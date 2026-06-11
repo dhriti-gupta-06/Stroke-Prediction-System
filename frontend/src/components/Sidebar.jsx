@@ -1,16 +1,19 @@
 import { NavLink, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, UserSearch, Upload,
-  BarChart3, Info, Activity
+  BarChart3, Info, Activity, TrendingUp
 } from 'lucide-react'
 
 const NAV = [
-  { to: '/',          icon: LayoutDashboard, label: 'Dashboard'       },
-  { to: '/predict',   icon: UserSearch,      label: 'Patient Analysis' },
-  { to: '/batch',     icon: Upload,          label: 'Batch Prediction' },
-  { to: '/analytics', icon: BarChart3,       label: 'Model Analytics'  },
-  { to: '/about',     icon: Info,            label: 'About'            },
+  { to: '/',                icon: LayoutDashboard, label: 'Dashboard'          },
+  { to: '/predict',         icon: UserSearch,      label: 'Patient Analysis'   },
+  { to: '/batch',           icon: Upload,          label: 'Batch Prediction'   },
+  { to: '/analytics',       icon: BarChart3,       label: 'Model Analytics'    },
+  { to: '/model-performance', icon: TrendingUp,    label: 'Model Performance'  },
+  { to: '/about',           icon: Info,            label: 'About'              },
 ]
+
+// rest of component unchanged
 
 export default function Sidebar() {
   return (

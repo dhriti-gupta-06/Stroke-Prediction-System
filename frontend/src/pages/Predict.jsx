@@ -1,10 +1,10 @@
 import { useState } from 'react'
-import { predict } from '../services/api'
+import { predict, savePrediction } from '../services/api'
 import PageHeader from '../components/PageHeader'
 import RiskGauge from '../components/RiskGauge'
 import Spinner from '../components/Spinner'
 import { getRiskColor, getPredictionColor } from '../utils/helpers'
-import { AlertCircle, CheckCircle2, ChevronRight, RotateCcw, Brain, ShieldAlert } from 'lucide-react'
+import { AlertCircle, CheckCircle2, ChevronRight, RotateCcw, Brain, ShieldAlert, Save } from 'lucide-react'
 
 const INITIAL = {
   id: '', gender: '', age: '', hypertension: '',
@@ -48,6 +48,8 @@ export default function Predict() {
   const [result,  setResult]  = useState(null)
   const [loading, setLoading] = useState(false)
   const [error,   setError]   = useState(null)
+  const [saving,  setSaving]  = useState(false)
+  const [saved,   setSaved]   = useState(false)
 
   const handleChange = e => setForm(p => ({ ...p, [e.target.name]: e.target.value }))
 
@@ -55,6 +57,7 @@ export default function Predict() {
     e.preventDefault()
     setError(null)
     setLoading(true)
+    setSaved(false)
     try {
       const res = await predict(form)
       setResult(res)
@@ -67,52 +70,46 @@ export default function Predict() {
     }
   }
 
+  const handleSave = async () => {
+    if (!result || saving || saved) return
+    setSaving(true)
+    try {
+      await savePrediction({ patient: form, result })
+      setSaved(true)
+    } catch (err) {
+      alert('Save failed: ' + (err.response?.data?.error ?? err.message))
+    } finally {
+      setSaving(false)
+    }
+  }
 
   const downloadPDF = async () => {
-  if (!result) return;
-
-  try {
-    const payload = {
-      ...form,
-      prediction: result.final_prediction,
-      probability: result.probability,
-      risk_level: result.risk_level,
-      explanation: result.explanation
-    };
-
-    const response = await fetch(
-      "http://127.0.0.1:5000/api/download-stroke-pdf",
-      {
+    if (!result) return
+    try {
+      const payload = {
+        ...form,
+        prediction: result.final_prediction,
+        probability: result.probability,
+        risk_level: result.risk_level,
+        explanation: result.explanation
+      }
+      const response = await fetch("http://127.0.0.1:5000/api/download-stroke-pdf", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
-      }
-    );
-
-    if (!response.ok) {
-      const err = await response.json();
-      throw new Error(err.error || "PDF failed");
+      })
+      if (!response.ok) { const err = await response.json(); throw new Error(err.error || "PDF failed") }
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url; a.download = "stroke_risk_report.pdf"; a.click()
+      window.URL.revokeObjectURL(url)
+    } catch (err) {
+      alert("PDF Error: " + err.message)
     }
-
-    const blob = await response.blob();
-    const url = window.URL.createObjectURL(blob);
-
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "stroke_risk_report.pdf";
-    a.click();
-
-    window.URL.revokeObjectURL(url);
-  } catch (err) {
-    alert("PDF Error: " + err.message);
   }
-};
 
-
-
-
-
-  const reset = () => { setForm(INITIAL); setResult(null); setError(null) }
+  const reset = () => { setForm(INITIAL); setResult(null); setError(null); setSaved(false) }
 
   const riskColor = result ? getRiskColor(result.risk_level) : null
   const predColor = result ? getPredictionColor(result.final_prediction) : null
@@ -172,12 +169,30 @@ export default function Predict() {
         {result && (
           <div className="lg:col-span-2 space-y-4 animate-fade-up">
 
-            <button
-              onClick={downloadPDF}
-              className="btn-primary w-full mb-3"
-            >
-              Download PDF Report
+            {/* Download Report — below Analyze Risk */}
+            <button onClick={downloadPDF} className="btn-primary w-full justify-center">
+              Download Report
             </button>
+
+            {/* Save Data button */}
+            <button
+              onClick={handleSave}
+              disabled={saving || saved}
+              className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm transition-all duration-150 border ${
+                saved
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-700 cursor-default'
+                  : 'bg-white border-slate-200 text-slate-700 hover:border-brand-300 hover:text-brand-700'
+              }`}
+            >
+              {saving ? (
+                <><Spinner size="sm" /> Saving…</>
+              ) : saved ? (
+                <><CheckCircle2 className="w-4 h-4" /> Saved</>
+              ) : (
+                <><Save className="w-4 h-4" /> Save Data</>
+              )}
+            </button>
+
             {/* Main result */}
             <div className={`card p-5 border ${predColor.border}`}>
               <div className="flex items-center justify-between mb-4">

@@ -14,5 +14,9 @@ frontend/build/
 # VS Code
 .vscode/
 
+# Database
+backend/instance/
+*.db
+
 # OS files
 .DS_Store

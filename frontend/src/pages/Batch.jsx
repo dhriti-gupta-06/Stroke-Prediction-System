@@ -1,9 +1,9 @@
 import { useState, useRef, useCallback } from 'react'
-import { batchPredict, downloadResults, downloadTemplate } from '../services/api'
+import { batchPredict, downloadResults, downloadTemplate, saveBatchPredictions } from '../services/api'
 import PageHeader from '../components/PageHeader'
 import Spinner from '../components/Spinner'
 import { getRiskColor, getPredictionColor } from '../utils/helpers'
-import { Upload, Download, FileSpreadsheet, AlertCircle, CheckCircle2, X, ArrowDownToLine } from 'lucide-react'
+import { Upload, Download, FileSpreadsheet, AlertCircle, CheckCircle2, X, ArrowDownToLine, Save } from 'lucide-react'
 
 function SummaryCard({ label, value, color }) {
   return (
@@ -20,6 +20,8 @@ export default function Batch() {
   const [loading,   setLoading]   = useState(false)
   const [result,    setResult]    = useState(null)
   const [error,     setError]     = useState(null)
+  const [saving,    setSaving]    = useState(false)
+  const [saved,     setSaved]     = useState(false)
   const inputRef = useRef()
 
   const handleFile = f => {
@@ -29,6 +31,7 @@ export default function Batch() {
     setFile(f)
     setError(null)
     setResult(null)
+    setSaved(false)
   }
 
   const onDrop = useCallback(e => {
@@ -41,7 +44,7 @@ export default function Batch() {
 
   const handleSubmit = async () => {
     if (!file) return
-    setLoading(true); setError(null)
+    setLoading(true); setError(null); setSaved(false)
     try {
       const res = await batchPredict(file)
       setResult(res)
@@ -49,6 +52,19 @@ export default function Batch() {
       setError(err.response?.data?.error ?? 'Upload failed. Check file format.')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleSaveBatch = async () => {
+    if (!result || saving || saved) return
+    setSaving(true)
+    try {
+      await saveBatchPredictions(result.results)
+      setSaved(true)
+    } catch (err) {
+      alert('Save failed: ' + (err.response?.data?.error ?? err.message))
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -69,16 +85,14 @@ export default function Batch() {
         }
       />
 
-      {/* Upload area */}
+      {/* Upload area — unchanged */}
       {!result && (
         <div className="card p-6 mb-6">
           <div
             onDrop={onDrop} onDragOver={onDragOver} onDragLeave={onDragLeave}
             onClick={() => inputRef.current?.click()}
             className={`border-2 border-dashed rounded-2xl p-10 text-center cursor-pointer transition-all duration-200 ${
-              dragging
-                ? 'border-brand-400 bg-brand-50'
-                : 'border-slate-200 hover:border-brand-300 hover:bg-slate-50'
+              dragging ? 'border-brand-400 bg-brand-50' : 'border-slate-200 hover:border-brand-300 hover:bg-slate-50'
             }`}
           >
             <input ref={inputRef} type="file" accept=".csv,.xlsx,.xls" className="hidden"
@@ -112,7 +126,6 @@ export default function Batch() {
             </button>
           </div>
 
-          {/* Column hint */}
           <div className="mt-5 p-4 bg-slate-50 rounded-xl border border-slate-100">
             <div className="text-xs font-semibold text-slate-500 mb-2 uppercase tracking-wide">Required Columns</div>
             <div className="flex flex-wrap gap-1.5">
@@ -127,27 +140,45 @@ export default function Batch() {
       {/* Results */}
       {result && (
         <div className="space-y-5 animate-fade-up">
-          {/* Summary */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <SummaryCard label="Total Patients"     value={result.total}           color="text-slate-800" />
-            <SummaryCard label="Stroke Risk"         value={result.stroke_count}    color="text-red-600"   />
-            <SummaryCard label="No Stroke"           value={result.no_stroke_count} color="text-emerald-600" />
-            <SummaryCard label="Avg Probability"     value={`${result.avg_probability}%`} color="text-brand-600" />
+            <SummaryCard label="Total Patients"  value={result.total}           color="text-slate-800" />
+            <SummaryCard label="Stroke Risk"      value={result.stroke_count}    color="text-red-600"   />
+            <SummaryCard label="No Stroke"        value={result.no_stroke_count} color="text-emerald-600" />
+            <SummaryCard label="Avg Probability"  value={`${result.avg_probability}%`} color="text-brand-600" />
           </div>
 
-          {/* Table */}
           <div className="card overflow-hidden">
+            {/* ── Toolbar with Save Batch Data added ── */}
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
               <div className="font-semibold text-slate-800 text-sm">Prediction Results</div>
-              <div className="flex gap-3">
-                <button onClick={() => { setResult(null); setFile(null) }} className="btn-secondary text-sm px-3 py-1.5">
+              <div className="flex gap-3 flex-wrap">
+                <button onClick={() => { setResult(null); setFile(null); setSaved(false) }} className="btn-secondary text-sm px-3 py-1.5">
                   <Upload className="w-3.5 h-3.5" /> New Upload
                 </button>
                 <button onClick={() => downloadResults(result.results)} className="btn-primary text-sm px-3 py-1.5">
                   <Download className="w-3.5 h-3.5" /> Download Excel
                 </button>
+                {/* Save Batch Data */}
+                <button
+                  onClick={handleSaveBatch}
+                  disabled={saving || saved}
+                  className={`flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-xl font-medium border transition-all duration-150 ${
+                    saved
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-700 cursor-default'
+                      : 'bg-white border-slate-200 text-slate-700 hover:border-brand-300 hover:text-brand-700'
+                  }`}
+                >
+                  {saving ? (
+                    <><Spinner size="sm" /> Saving…</>
+                  ) : saved ? (
+                    <><CheckCircle2 className="w-3.5 h-3.5" /> Saved</>
+                  ) : (
+                    <><Save className="w-3.5 h-3.5" /> Save Batch Data</>
+                  )}
+                </button>
               </div>
             </div>
+
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>

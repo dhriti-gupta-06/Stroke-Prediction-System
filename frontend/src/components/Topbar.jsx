@@ -1,14 +1,17 @@
 import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
-import { Activity, Menu, X, LayoutDashboard, UserSearch, Upload, BarChart3, Info } from 'lucide-react'
+import { Activity, Menu, X, LayoutDashboard, UserSearch, Upload, BarChart3, Info, TrendingUp } from 'lucide-react'
 
 const NAV = [
-  { to: '/',          icon: LayoutDashboard, label: 'Dashboard'        },
-  { to: '/predict',   icon: UserSearch,      label: 'Patient Analysis' },
-  { to: '/batch',     icon: Upload,          label: 'Batch Prediction' },
-  { to: '/analytics', icon: BarChart3,       label: 'Model Analytics'  },
-  { to: '/about',     icon: Info,            label: 'About'            },
+  { to: '/',                  icon: LayoutDashboard, label: 'Dashboard'          },
+  { to: '/predict',           icon: UserSearch,      label: 'Patient Analysis'   },
+  { to: '/batch',             icon: Upload,          label: 'Batch Prediction'   },
+  { to: '/analytics',         icon: BarChart3,       label: 'Model Analytics'    },
+  { to: '/model-performance', icon: TrendingUp,      label: 'Model Performance'  },
+  { to: '/about',             icon: Info,            label: 'About'              },
 ]
+
+// rest of component unchanged
 
 export default function Topbar() {
   const [open, setOpen] = useState(false)
