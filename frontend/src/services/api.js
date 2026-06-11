@@ -5,7 +5,8 @@ const api = axios.create({ baseURL: '/api' })
 export const getDashboard        = ()       => api.get('/dashboard').then(r => r.data)
 export const getMetrics          = ()       => api.get('/metrics').then(r => r.data)
 export const getModelPerformance = ()       => api.get('/model-performance').then(r => r.data)
-export const getAnalyticsMetrics = ()       => api.get('/analytics-metrics').then(r => r.data)
+export const getAnalyticsMetrics = () =>
+  api.get('/advanced-metrics').then(r => r.data)
 
 export const predict = (data) => api.post('/predict', data).then(r => r.data)
 

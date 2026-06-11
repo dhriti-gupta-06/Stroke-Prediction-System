@@ -4,7 +4,6 @@ from flask_sqlalchemy import SQLAlchemy
 
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
-from flask import Response
 import datetime
 import uuid
 
@@ -33,13 +32,13 @@ with app.app_context():
 # ─── Load Models ────────────────────────────────────────────────────────────
 MODEL_DIR = "models"
 
-lr        = joblib.load(f"{MODEL_DIR}/logistic_regression.pkl")
-dt        = joblib.load(f"{MODEL_DIR}/decision_tree.pkl")
-rf        = joblib.load(f"{MODEL_DIR}/random_forest.pkl")
-rf_smote  = joblib.load(f"{MODEL_DIR}/random_forest_smote.pkl")
-xgb_m     = joblib.load(f"{MODEL_DIR}/xgboost.pkl")
-cat       = joblib.load(f"{MODEL_DIR}/catboost.pkl")
-lgb       = joblib.load(f"{MODEL_DIR}/lightGBM_model.pkl")
+lr       = joblib.load(f"{MODEL_DIR}/logistic_regression.pkl")
+dt       = joblib.load(f"{MODEL_DIR}/decision_tree.pkl")
+rf       = joblib.load(f"{MODEL_DIR}/random_forest.pkl")
+rf_smote = joblib.load(f"{MODEL_DIR}/random_forest_smote.pkl")
+xgb_m    = joblib.load(f"{MODEL_DIR}/xgboost.pkl")
+cat      = joblib.load(f"{MODEL_DIR}/catboost.pkl")
+lgb      = joblib.load(f"{MODEL_DIR}/lightGBM_model.pkl")
 
 scaler          = joblib.load(f"{MODEL_DIR}/scaler.pkl")
 bmi_median      = joblib.load(f"{MODEL_DIR}/bmi_median.pkl")
@@ -50,14 +49,21 @@ metrics         = joblib.load(f"{MODEL_DIR}/metrics.pkl")
 
 THRESHOLD = 0.10
 
+MODEL_NAMES = [
+    "Logistic Regression", "Decision Tree", "Random Forest",
+    "Random Forest + SMOTE", "XGBoost", "CatBoost", "LightGBM"
+]
+
+# ─── Helpers ─────────────────────────────────────────────────────────────────
+
 def get_risk_level(prob):
     if prob < 15:   return "Low"
     elif prob < 40: return "Moderate"
     elif prob < 65: return "High"
     else:           return "Critical"
 
+
 def run_all_models(patient):
-    """Run all 7 models on a preprocessed patient dict. Returns probs dict."""
     df = preprocess_input(patient, bmi_median, le_married, le_residence, feature_columns)
     df_scaled = scaler.transform(df)
     return {
@@ -69,6 +75,73 @@ def run_all_models(patient):
         "CatBoost":              float(cat.predict_proba(df)[:, 1][0]),
         "LightGBM":              float(lgb.predict_proba(df)[:, 1][0]),
     }, df
+
+
+def _unified_records():
+    """
+    Return a unified list of dicts from both tables for analytics.
+    Each dict has consistent keys: final, probability, source,
+    lr/dt/rf/rfs/xgb/cat/lgb (predictions), and per-model probabilities
+    where available.
+    """
+    rows = []
+    for r in PatientPrediction.query.all():
+        rows.append({
+            "source":    "single",
+            "final":     r.final_prediction,
+            "prob":      r.probability or 0,
+            "lr":        r.pred_logistic_regression,
+            "dt":        r.pred_decision_tree,
+            "rf":        r.pred_random_forest,
+            "rfs":       r.pred_random_forest_smote,
+            "xgb":       r.pred_xgboost,
+            "cat":       r.pred_catboost,
+            "lgb":       r.pred_lightgbm,
+            "prob_lr":   r.prob_logistic_regression  or 0,
+            "prob_dt":   r.prob_decision_tree         or 0,
+            "prob_rf":   r.prob_random_forest         or 0,
+            "prob_rfs":  r.prob_random_forest_smote   or 0,
+            "prob_xgb":  r.prob_xgboost               or 0,
+            "prob_cat":  r.prob_catboost               or 0,
+            "prob_lgb":  r.prob_lightgbm               or 0,
+        })
+    for r in BatchPrediction.query.all():
+        rows.append({
+            "source":    "batch",
+            "final":     r.final_prediction,
+            "prob":      r.probability or 0,
+            "lr":        r.pred_logistic_regression,
+            "dt":        r.pred_decision_tree,
+            "rf":        r.pred_random_forest,
+            "rfs":       r.pred_random_forest_smote,
+            "xgb":       r.pred_xgboost,
+            "cat":       r.pred_catboost,
+            "lgb":       r.pred_lightgbm,
+            # BatchPrediction has no per-model probability columns → default 0
+            "prob_lr":   0,
+            "prob_dt":   0,
+            "prob_rf":   0,
+            "prob_rfs":  0,
+            "prob_xgb":  0,
+            "prob_cat":  0,
+            "prob_lgb":  0,
+        })
+    return rows
+
+
+def _compute_cm_metrics(preds, ground_truth):
+    tp = sum(1 for p, g in zip(preds, ground_truth) if p == "Stroke"    and g == "Stroke")
+    tn = sum(1 for p, g in zip(preds, ground_truth) if p == "No Stroke" and g == "No Stroke")
+    fp = sum(1 for p, g in zip(preds, ground_truth) if p == "Stroke"    and g == "No Stroke")
+    fn = sum(1 for p, g in zip(preds, ground_truth) if p == "No Stroke" and g == "Stroke")
+    n  = len(preds)
+    return (
+        round((tp + tn) / n * 100, 2)              if n             else 0,
+        round(tp / (tp + fp) * 100, 2)              if (tp + fp)     else 0,
+        round(tp / (tp + fn) * 100, 2)              if (tp + fn)     else 0,
+        round(2*tp / (2*tp + fp + fn) * 100, 2)     if (2*tp+fp+fn)  else 0,
+    )
+
 
 def build_stroke_report(patient, probability, prediction, risk_level):
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -153,7 +226,7 @@ def dashboard():
     leaderboard = []
     for name, m in metrics.items():
         leaderboard.append({
-            "model": name,
+            "model":    name,
             "accuracy":  round(m["accuracy"]  * 100, 2),
             "precision": round(m["precision"] * 100, 2),
             "recall":    round(m["recall"]    * 100, 2),
@@ -164,14 +237,14 @@ def dashboard():
     leaderboard.sort(key=lambda x: x["roc_auc"], reverse=True)
     return jsonify({
         "production_model": {
-            "name": "LightGBM",
+            "name":     "LightGBM",
             "accuracy": round(lgb_m["accuracy"] * 100, 2),
             "recall":   round(lgb_m["recall"]   * 100, 2),
             "roc_auc":  round(lgb_m["roc_auc"]  * 100, 2),
             "f1_score": round(lgb_m["f1_score"] * 100, 2),
         },
         "total_models": len(metrics),
-        "leaderboard": leaderboard
+        "leaderboard":  leaderboard,
     })
 
 # ─── API: Model Metrics (static from training) ───────────────────────────────
@@ -180,121 +253,155 @@ def get_metrics():
     result = []
     for name, m in metrics.items():
         result.append({
-            "model":      name,
-            "accuracy":   round(m["accuracy"]  * 100, 2),
-            "precision":  round(m["precision"] * 100, 2),
-            "recall":     round(m["recall"]    * 100, 2),
-            "f1_score":   round(m["f1_score"]  * 100, 2),
-            "roc_auc":    round(m["roc_auc"]   * 100, 2),
+            "model":            name,
+            "accuracy":         round(m["accuracy"]  * 100, 2),
+            "precision":        round(m["precision"] * 100, 2),
+            "recall":           round(m["recall"]    * 100, 2),
+            "f1_score":         round(m["f1_score"]  * 100, 2),
+            "roc_auc":          round(m["roc_auc"]   * 100, 2),
             "confusion_matrix": m["confusion_matrix"],
-            "is_production": name == "LightGBM"
+            "is_production":    name == "LightGBM",
         })
     return jsonify(result)
 
-# ─── API: Analytics Metrics from DB ─────────────────────────────────────────
+# ─── API: Analytics Metrics from DB (unified) ────────────────────────────────
 @app.route("/api/analytics-metrics", methods=["GET"])
 def analytics_metrics():
-    """
-    Compute per-model accuracy/precision/recall/F1 from saved prediction records.
-    Uses LightGBM final_prediction as ground truth proxy (since we have no
-    actual clinical labels), and compares each model's stored prediction against it.
-    Returns both DB-derived metrics AND total counts for the distribution chart.
-    """
-    records = PatientPrediction.query.all()
-    batch   = BatchPrediction.query.all()
+    all_records  = _unified_records()
+    total        = len(all_records)
 
-    all_records = []
-    for r in records:
-        all_records.append({
-            'final': r.final_prediction,
-            'lr':    r.pred_logistic_regression,
-            'dt':    r.pred_decision_tree,
-            'rf':    r.pred_random_forest,
-            'rfs':   r.pred_random_forest_smote,
-            'xgb':   r.pred_xgboost,
-            'cat':   r.pred_catboost,
-            'lgb':   r.pred_lightgbm,
-        })
-    for r in batch:
-        all_records.append({
-            'final': r.final_prediction,
-            'lr':    r.pred_logistic_regression,
-            'dt':    r.pred_decision_tree,
-            'rf':    r.pred_random_forest,
-            'rfs':   r.pred_random_forest_smote,
-            'xgb':   r.pred_xgboost,
-            'cat':   r.pred_catboost,
-            'lgb':   r.pred_lightgbm,
-        })
-
-    total = len(all_records)
-
+    empty_models = [
+        {"model": n, "accuracy": 0, "precision": 0, "recall": 0, "f1_score": 0}
+        for n in MODEL_NAMES
+    ]
     if total == 0:
-        # Return zeros — frontend will show empty state
-        model_names = [
-            "Logistic Regression", "Decision Tree", "Random Forest",
-            "Random Forest + SMOTE", "XGBoost", "CatBoost", "LightGBM"
-        ]
         return jsonify({
-            "total": 0,
-            "stroke": 0,
-            "no_stroke": 0,
-            "model_metrics": [
-                {"model": n, "accuracy": 0, "precision": 0, "recall": 0, "f1_score": 0}
-                for n in model_names
-            ]
+            "total": 0, "stroke": 0, "no_stroke": 0,
+            "model_metrics": empty_models,
         })
 
-    stroke_count    = sum(1 for r in all_records if r['final'] == 'Stroke')
-    no_stroke_count = total - stroke_count
+    stroke_count = sum(1 for r in all_records if r["final"] == "Stroke")
 
-    def compute_metrics(preds, ground_truth):
-        """Compute accuracy, precision, recall, F1 against ground truth list."""
-        tp = sum(1 for p, g in zip(preds, ground_truth) if p == 'Stroke'    and g == 'Stroke')
-        tn = sum(1 for p, g in zip(preds, ground_truth) if p == 'No Stroke' and g == 'No Stroke')
-        fp = sum(1 for p, g in zip(preds, ground_truth) if p == 'Stroke'    and g == 'No Stroke')
-        fn = sum(1 for p, g in zip(preds, ground_truth) if p == 'No Stroke' and g == 'Stroke')
-
-        n = len(preds)
-        accuracy  = round((tp + tn) / n * 100, 2)          if n            else 0
-        precision = round(tp / (tp + fp) * 100, 2)          if (tp + fp)    else 0
-        recall    = round(tp / (tp + fn) * 100, 2)          if (tp + fn)    else 0
-        f1        = round(2 * tp / (2*tp + fp + fn) * 100, 2) if (2*tp+fp+fn) else 0
-        return accuracy, precision, recall, f1
-
-    ground_truth = [r['final'] for r in all_records]
-
-    model_keys = {
-        "Logistic Regression":   'lr',
-        "Decision Tree":         'dt',
-        "Random Forest":         'rf',
-        "Random Forest + SMOTE": 'rfs',
-        "XGBoost":               'xgb',
-        "CatBoost":              'cat',
-        "LightGBM":              'lgb',
+    ground_truth = [r["final"] for r in all_records]
+    model_key_map = {
+        "Logistic Regression":   "lr",
+        "Decision Tree":         "dt",
+        "Random Forest":         "rf",
+        "Random Forest + SMOTE": "rfs",
+        "XGBoost":               "xgb",
+        "CatBoost":              "cat",
+        "LightGBM":              "lgb",
     }
 
     model_metrics = []
-    for name, key in model_keys.items():
-        preds = [r[key] for r in all_records if r[key] is not None]
-        gt_filtered = [ground_truth[i] for i, r in enumerate(all_records) if r[key] is not None]
-        if not preds:
+    for name, key in model_key_map.items():
+        valid = [(r[key], ground_truth[i]) for i, r in enumerate(all_records) if r[key] is not None]
+        if not valid:
             model_metrics.append({"model": name, "accuracy": 0, "precision": 0, "recall": 0, "f1_score": 0})
             continue
-        acc, prec, rec, f1 = compute_metrics(preds, gt_filtered)
-        model_metrics.append({
-            "model": name,
-            "accuracy":  acc,
-            "precision": prec,
-            "recall":    rec,
-            "f1_score":  f1,
-        })
+        preds, gt = zip(*valid)
+        acc, prec, rec, f1 = _compute_cm_metrics(list(preds), list(gt))
+        model_metrics.append({"model": name, "accuracy": acc, "precision": prec, "recall": rec, "f1_score": f1})
 
     return jsonify({
-        "total":        total,
-        "stroke":       stroke_count,
-        "no_stroke":    no_stroke_count,
+        "total":         total,
+        "stroke":        stroke_count,
+        "no_stroke":     total - stroke_count,
         "model_metrics": model_metrics,
+    })
+
+# ─── API: Advanced Metrics ────────────────────────────────────────────────────
+@app.route("/api/advanced-metrics", methods=["GET"])
+def advanced_metrics():
+    all_records = _unified_records()
+    total       = len(all_records)
+
+    model_key_map = {
+        "Logistic Regression":   ("lr",  "prob_lr"),
+        "Decision Tree":         ("dt",  "prob_dt"),
+        "Random Forest":         ("rf",  "prob_rf"),
+        "Random Forest + SMOTE": ("rfs", "prob_rfs"),
+        "XGBoost":               ("xgb", "prob_xgb"),
+        "CatBoost":              ("cat", "prob_cat"),
+        "LightGBM":              ("lgb", "prob_lgb"),
+    }
+
+    # ── 1. Model Usage Frequency ─────────────────────────────────────────────
+    usage_frequency = []
+    for name, (pred_key, _) in model_key_map.items():
+        count = sum(1 for r in all_records if r[pred_key] is not None)
+        usage_frequency.append({"model": name, "count": count})
+
+    # ── 2. Average Risk Score per Model ──────────────────────────────────────
+    avg_risk_per_model = []
+    for name, (pred_key, prob_key) in model_key_map.items():
+        probs = [r[prob_key] for r in all_records if r[pred_key] is not None and r[prob_key] > 0]
+        # For batch records prob_key is always 0; fall back to overall probability
+        if not probs:
+            probs = [r["prob"] for r in all_records if r[pred_key] is not None]
+        avg = round(sum(probs) / len(probs), 2) if probs else 0
+        avg_risk_per_model.append({"model": name, "avg_probability": avg})
+
+    # ── 3. Stroke Prediction Rate per Model ──────────────────────────────────
+    stroke_rate_per_model = []
+    for name, (pred_key, _) in model_key_map.items():
+        preds = [r[pred_key] for r in all_records if r[pred_key] is not None]
+        rate  = round(sum(1 for p in preds if p == "Stroke") / len(preds) * 100, 2) if preds else 0
+        stroke_rate_per_model.append({"model": name, "stroke_rate": rate})
+
+    # ── 4. Confidence Distribution (using LightGBM / overall probability) ────
+    bins   = ["0–20%", "20–40%", "40–60%", "60–80%", "80–100%"]
+    counts = [0, 0, 0, 0, 0]
+    for r in all_records:
+        p = r["prob"]
+        if p < 20:    counts[0] += 1
+        elif p < 40:  counts[1] += 1
+        elif p < 60:  counts[2] += 1
+        elif p < 80:  counts[3] += 1
+        else:         counts[4] += 1
+    confidence_distribution = [{"range": b, "count": c} for b, c in zip(bins, counts)]
+
+    # ── 5. Patient Severity Breakdown per Model ───────────────────────────────
+    severity_breakdown = []
+    for name, (pred_key, prob_key) in model_key_map.items():
+        valid_probs = [r[prob_key] for r in all_records if r[pred_key] is not None and r[prob_key] > 0]
+        if not valid_probs:
+            # Fall back to overall probability for batch records
+            valid_probs = [r["prob"] for r in all_records if r[pred_key] is not None]
+        low    = sum(1 for p in valid_probs if p < 40)
+        medium = sum(1 for p in valid_probs if 40 <= p < 70)
+        high   = sum(1 for p in valid_probs if p >= 70)
+        severity_breakdown.append({"model": name, "low": low, "medium": medium, "high": high})
+
+    # ── 6. Batch vs Individual Comparison ────────────────────────────────────
+    single_records = [r for r in all_records if r["source"] == "single"]
+    batch_records  = [r for r in all_records if r["source"] == "batch"]
+
+    def _avg_prob(recs):
+        probs = [r["prob"] for r in recs if r["prob"] is not None]
+        return round(sum(probs) / len(probs), 2) if probs else 0
+
+    def _stroke_rate(recs):
+        if not recs: return 0
+        return round(sum(1 for r in recs if r["final"] == "Stroke") / len(recs) * 100, 2)
+
+    batch_vs_single = {
+        "single_count":       len(single_records),
+        "batch_count":        len(batch_records),
+        "single_avg_risk":    _avg_prob(single_records),
+        "batch_avg_risk":     _avg_prob(batch_records),
+        "single_stroke_rate": _stroke_rate(single_records),
+        "batch_stroke_rate":  _stroke_rate(batch_records),
+    }
+
+    return jsonify({
+        "total":                total,
+        "usage_frequency":      usage_frequency,
+        "avg_risk_per_model":   avg_risk_per_model,
+        "stroke_rate_per_model":stroke_rate_per_model,
+        "confidence_distribution": confidence_distribution,
+        "severity_breakdown":   severity_breakdown,
+        "batch_vs_single":      batch_vs_single,
     })
 
 # ─── API: Individual Predict ─────────────────────────────────────────────────
@@ -312,15 +419,15 @@ def predict():
         "Residence_type":    data["Residence_type"],
         "avg_glucose_level": float(data["avg_glucose_level"]),
         "bmi":               float(data["bmi"]) if data.get("bmi") else None,
-        "smoking_status":    data["smoking_status"]
+        "smoking_status":    data["smoking_status"],
     }
 
     probs, _ = run_all_models(patient)
 
-    lgb_prob = probs["LightGBM"]
-    lgb_pct  = round(lgb_prob * 100, 2)
-    final    = "Stroke" if lgb_prob > THRESHOLD else "No Stroke"
-    risk     = get_risk_level(lgb_pct)
+    lgb_prob    = probs["LightGBM"]
+    lgb_pct     = round(lgb_prob * 100, 2)
+    final       = "Stroke" if lgb_prob > THRESHOLD else "No Stroke"
+    risk        = get_risk_level(lgb_pct)
     explanation = generate_explanation(patient, final)
 
     model_results = [
@@ -328,7 +435,7 @@ def predict():
             "model":         name,
             "probability":   round(p * 100, 2),
             "prediction":    "Stroke" if p > THRESHOLD else "No Stroke",
-            "is_production": name == "LightGBM"
+            "is_production": name == "LightGBM",
         }
         for name, p in probs.items()
     ]
@@ -389,8 +496,6 @@ def batch_predict():
             pct      = round(lgb_prob * 100, 2)
             pred     = "Stroke" if lgb_prob > THRESHOLD else "No Stroke"
             risk     = get_risk_level(pct)
-
-            # Per-model predictions for saving
             model_preds = {
                 "pred_logistic_regression":  "Stroke" if probs["Logistic Regression"]   > THRESHOLD else "No Stroke",
                 "pred_decision_tree":        "Stroke" if probs["Decision Tree"]          > THRESHOLD else "No Stroke",
@@ -400,7 +505,7 @@ def batch_predict():
                 "pred_catboost":             "Stroke" if probs["CatBoost"]               > THRESHOLD else "No Stroke",
                 "pred_lightgbm":             "Stroke" if probs["LightGBM"]               > THRESHOLD else "No Stroke",
             }
-        except Exception as ex:
+        except Exception:
             pred, pct, risk = "Error", 0.0, "Unknown"
             model_preds = {}
 
@@ -409,7 +514,7 @@ def batch_predict():
             "Prediction":    pred,
             "Probability":   pct,
             "Risk_Category": risk,
-            **model_preds          # ← included so Save Batch Data can persist them
+            **model_preds,
         })
 
     stroke_count    = sum(1 for r in results if r["Prediction"] == "Stroke")
@@ -421,10 +526,10 @@ def batch_predict():
         "stroke_count":    stroke_count,
         "no_stroke_count": no_stroke_count,
         "avg_probability": avg_prob,
-        "results":         results
+        "results":         results,
     })
 
-# ─── API: Save Individual Prediction ────────────────────────────────────────
+# ─── API: Save Individual Prediction (upsert by patient_id) ──────────────────
 @app.route("/api/save-prediction", methods=["POST"])
 def save_prediction():
     try:
@@ -432,12 +537,15 @@ def save_prediction():
         patient = data.get("patient", {})
         result  = data.get("result",  {})
         models  = {m["model"]: m for m in result.get("model_results", [])}
+        pid     = str(patient.get("id", ""))
 
         def mp(name, key):
             return models.get(name, {}).get(key)
 
-        record = PatientPrediction(
-            patient_id        = str(patient.get("id", "")),
+        # ── Upsert: update existing row if patient_id matches ────────────────
+        existing = PatientPrediction.query.filter_by(patient_id=pid).first()
+
+        fields = dict(
             gender            = patient.get("gender"),
             age               = float(patient.get("age", 0) or 0),
             hypertension      = int(patient.get("hypertension", 0) or 0),
@@ -465,26 +573,38 @@ def save_prediction():
             prob_xgboost              = mp("XGBoost",                "probability"),
             prob_catboost             = mp("CatBoost",               "probability"),
             prob_lightgbm             = mp("LightGBM",               "probability"),
+            timestamp         = datetime.datetime.utcnow(),
         )
-        db.session.add(record)
+
+        if existing:
+            for k, v in fields.items():
+                setattr(existing, k, v)
+            record = existing
+        else:
+            record = PatientPrediction(patient_id=pid, **fields)
+            db.session.add(record)
+
         db.session.commit()
-        return jsonify({"success": True, "id": record.id})
+        return jsonify({"success": True, "id": record.id, "updated": existing is not None})
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
 
-# ─── API: Save Batch Predictions ────────────────────────────────────────────
+# ─── API: Save Batch Predictions (upsert by patient_id within batch table) ───
 @app.route("/api/save-batch-predictions", methods=["POST"])
 def save_batch_predictions():
     try:
         data     = request.get_json()
         results  = data.get("results", [])
         batch_id = str(uuid.uuid4())[:8].upper()
+        now      = datetime.datetime.utcnow()
 
+        saved = updated = 0
         for row in results:
-            record = BatchPrediction(
+            pid = str(row.get("id", ""))
+
+            fields = dict(
                 batch_id          = batch_id,
-                patient_id        = str(row.get("id", "")),
                 gender            = row.get("gender"),
                 age               = float(row.get("age", 0) or 0),
                 hypertension      = int(row.get("hypertension", 0) or 0),
@@ -505,48 +625,96 @@ def save_batch_predictions():
                 pred_xgboost              = row.get("pred_xgboost"),
                 pred_catboost             = row.get("pred_catboost"),
                 pred_lightgbm             = row.get("pred_lightgbm"),
+                upload_timestamp  = now,
+                record_timestamp  = now,
             )
-            db.session.add(record)
+
+            existing = BatchPrediction.query.filter_by(patient_id=pid).first()
+            if existing:
+                for k, v in fields.items():
+                    setattr(existing, k, v)
+                updated += 1
+            else:
+                db.session.add(BatchPrediction(patient_id=pid, **fields))
+                saved += 1
 
         db.session.commit()
-        return jsonify({"success": True, "batch_id": batch_id, "saved": len(results)})
+        return jsonify({"success": True, "batch_id": batch_id, "saved": saved, "updated": updated})
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
 
-# ─── API: Fetch Prediction Records (paginated) ───────────────────────────────
+# ─── API: Fetch Prediction Records — unified (paginated) ─────────────────────
 @app.route("/api/predictions", methods=["GET"])
 def get_predictions():
-    page     = int(request.args.get("page", 1))
-    per_page = int(request.args.get("per_page", 20))
-    search   = request.args.get("search", "").strip()
+    page        = int(request.args.get("page", 1))
+    per_page    = int(request.args.get("per_page", 20))
+    search      = request.args.get("search", "").strip()
     filter_pred = request.args.get("prediction", "")
 
-    query = PatientPrediction.query
+    # ── Single predictions ───────────────────────────────────────────────────
+    q_single = PatientPrediction.query
     if search:
-        query = query.filter(
-            db.or_(
-                PatientPrediction.patient_id.ilike(f"%{search}%"),
-                PatientPrediction.gender.ilike(f"%{search}%"),
-                PatientPrediction.smoking_status.ilike(f"%{search}%"),
-            )
-        )
+        q_single = q_single.filter(db.or_(
+            PatientPrediction.patient_id.ilike(f"%{search}%"),
+            PatientPrediction.gender.ilike(f"%{search}%"),
+            PatientPrediction.smoking_status.ilike(f"%{search}%"),
+        ))
     if filter_pred:
-        query = query.filter(PatientPrediction.final_prediction == filter_pred)
+        q_single = q_single.filter(PatientPrediction.final_prediction == filter_pred)
 
-    total   = query.count()
-    records = query.order_by(PatientPrediction.timestamp.desc()) \
-                   .offset((page - 1) * per_page).limit(per_page).all()
+    single_rows = q_single.all()
+
+    # ── Batch predictions ────────────────────────────────────────────────────
+    q_batch = BatchPrediction.query
+    if search:
+        q_batch = q_batch.filter(db.or_(
+            BatchPrediction.patient_id.ilike(f"%{search}%"),
+            BatchPrediction.gender.ilike(f"%{search}%"),
+            BatchPrediction.smoking_status.ilike(f"%{search}%"),
+        ))
+    if filter_pred:
+        q_batch = q_batch.filter(BatchPrediction.final_prediction == filter_pred)
+
+    batch_rows = q_batch.all()
+
+    # ── Normalise batch rows to the same dict shape as single rows ────────────
+    def batch_to_dict(r):
+        d = r.to_dict()
+        # Ensure the same key the frontend uses for timestamp
+        d["timestamp"] = d.get("record_timestamp") or d.get("upload_timestamp")
+        d["source"]    = "batch"
+        return d
+
+    def single_to_dict(r):
+        d = r.to_dict()
+        d["source"] = "single"
+        return d
+
+    all_rows = (
+        [single_to_dict(r) for r in single_rows] +
+        [batch_to_dict(r)  for r in batch_rows]
+    )
+
+    # Sort by timestamp descending (newest first)
+    all_rows.sort(
+        key=lambda x: x.get("timestamp") or "",
+        reverse=True,
+    )
+
+    total  = len(all_rows)
+    start  = (page - 1) * per_page
+    paged  = all_rows[start : start + per_page]
 
     return jsonify({
-        "records":  [r.to_dict() for r in records],
+        "records":  paged,
         "total":    total,
         "page":     page,
         "per_page": per_page,
-        "pages":    (total + per_page - 1) // per_page,
+        "pages":    max(1, (total + per_page - 1) // per_page),
     })
 
-# ─── API: Model Performance (same as metrics) ────────────────────────────────
+# ─── API: Model Performance ──────────────────────────────────────────────────
 @app.route("/api/model-performance", methods=["GET"])
 def model_performance():
     return get_metrics()
@@ -566,7 +734,7 @@ def batch_download():
         output,
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         as_attachment=True,
-        download_name="stroke_predictions.xlsx"
+        download_name="stroke_predictions.xlsx",
     )
 
 # ─── API: Sample Template ───────────────────────────────────────────────────
@@ -576,12 +744,12 @@ def sample_template():
         "id": 1001, "gender": "Male", "age": 67, "hypertension": 0,
         "heart_disease": 1, "ever_married": "Yes", "work_type": "Private",
         "Residence_type": "Urban", "avg_glucose_level": 228.69,
-        "bmi": 36.6, "smoking_status": "formerly smoked"
+        "bmi": 36.6, "smoking_status": "formerly smoked",
     }, {
         "id": 1002, "gender": "Female", "age": 45, "hypertension": 0,
         "heart_disease": 0, "ever_married": "Yes", "work_type": "Self-employed",
         "Residence_type": "Rural", "avg_glucose_level": 87.19,
-        "bmi": 28.4, "smoking_status": "never smoked"
+        "bmi": 28.4, "smoking_status": "never smoked",
     }])
     output = BytesIO()
     sample.to_excel(output, index=False)
@@ -590,7 +758,7 @@ def sample_template():
         output,
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         as_attachment=True,
-        download_name="sample_template.xlsx"
+        download_name="sample_template.xlsx",
     )
 
 # ─── API: Download Metrics CSV ──────────────────────────────────────────────
@@ -599,12 +767,12 @@ def download_metrics():
     rows = []
     for model_name, m in metrics.items():
         rows.append({
-            "Model":          model_name,
-            "Accuracy (%)":   round(m["accuracy"]  * 100, 2),
-            "Precision (%)":  round(m["precision"] * 100, 2),
-            "Recall (%)":     round(m["recall"]    * 100, 2),
-            "F1 Score (%)":   round(m["f1_score"]  * 100, 2),
-            "ROC-AUC (%)":    round(m["roc_auc"]   * 100, 2),
+            "Model":         model_name,
+            "Accuracy (%)":  round(m["accuracy"]  * 100, 2),
+            "Precision (%)": round(m["precision"] * 100, 2),
+            "Recall (%)":    round(m["recall"]    * 100, 2),
+            "F1 Score (%)":  round(m["f1_score"]  * 100, 2),
+            "ROC-AUC (%)":   round(m["roc_auc"]   * 100, 2),
         })
     df = pd.DataFrame(rows)
     filename = "model_analytics.csv"
@@ -687,7 +855,7 @@ It is NOT a medical diagnosis.
         buffer,
         mimetype="application/pdf",
         as_attachment=True,
-        download_name="stroke_risk_report.pdf"
+        download_name="stroke_risk_report.pdf",
     )
 
 if __name__ == "__main__":

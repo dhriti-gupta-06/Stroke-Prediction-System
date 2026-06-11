@@ -1,23 +1,17 @@
-import { useEffect, useState } from 'react'
-import { getMetrics, getPredictions } from '../services/api'
+import { useEffect, useState, useCallback } from 'react'
+import { getMetrics, getPredictions, getAnalyticsMetrics } from '../services/api'
 import PageHeader from '../components/PageHeader'
 import Spinner from '../components/Spinner'
 import { Search, ChevronLeft, ChevronRight as ChevRight } from 'lucide-react'
 import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts'
 
-const METRIC_KEYS = ['accuracy', 'precision', 'recall', 'f1_score', 'roc_auc']
-const TAB_KEYS = ['accuracy', 'precision', 'recall', 'f1_score', 'roc_auc']
-const METRIC_LABELS = { accuracy: 'Accuracy', precision: 'Precision', recall: 'Recall', f1_score: 'F1 Score', roc_auc: 'ROC-AUC', confusion_matrix: 'Confusion Matrix' }
 
-const BAR_COLOR = '#0a78ed'
+
+const SHORT = n =>
+  n.replace('Random Forest + SMOTE', 'RF+SMOTE').replace('Random Forest', 'RF')
+   .replace('Logistic Regression', 'LogReg').replace('Decision Tree', 'DecTree')
 
 const CustomTooltip = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null
@@ -34,129 +28,215 @@ const CustomTooltip = ({ active, payload, label }) => {
   )
 }
 
-const SHORT = n => n.replace('Random Forest + SMOTE', 'RF+SMOTE').replace('Random Forest', 'RF')
-  .replace('Logistic Regression', 'LogReg').replace('Decision Tree', 'DecTree')
+// ── Compact insight card ──────────────────────────────────────────────────────
+function InsightRow({ label, items, valueKey, labelKey = 'model', unit = '', color = 'text-brand-600' }) {
+  if (!items?.length) return null
+  return (
+    <div>
+      <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">{label}</div>
+      <div className="flex flex-wrap gap-2">
+        {items.map((item, i) => (
+          <div key={i} className="bg-slate-50 border border-slate-100 rounded-xl px-3 py-2 text-center min-w-[80px]">
+            <div className={`text-sm font-bold ${color}`}>
+              {item[valueKey]}{unit}
+            </div>
+            <div className="text-[10px] text-slate-400 mt-0.5 leading-tight">{SHORT(item[labelKey])}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 export default function Analytics() {
-  const [data, setData]     = useState([])
-  const [loading, setLoad]  = useState(true)
-  const [activeMetric, setActiveMetric] = useState('roc_auc')
+  // ── Static metrics (existing) ─────────────────────────────────────────────
+  const [data,         setData]        = useState([])
+  const [loading,      setLoad]        = useState(true)
   
 
-  // Records table state
-  const [records, setRecords]     = useState([])
-  const [recPage, setRecPage]     = useState(1)
-  const [recTotal, setRecTotal]   = useState(0)
-  const [recPages, setRecPages]   = useState(1)
-  const [recSearch, setRecSearch] = useState('')
-  const [recFilter, setRecFilter] = useState('')
-  const [recLoading, setRecLoad]  = useState(false)
+  // ── Advanced metrics (new) ────────────────────────────────────────────────
+  const [adv,       setAdv]       = useState(null)
+  const [advLoading, setAdvLoad]  = useState(true)
 
+  // ── Records table (existing) ──────────────────────────────────────────────
+  const [records,    setRecords]   = useState([])
+  const [recPage,    setRecPage]   = useState(1)
+  const [recTotal,   setRecTotal]  = useState(0)
+  const [recPages,   setRecPages]  = useState(1)
+  const [recSearch,  setRecSearch] = useState('')
+  const [recFilter,  setRecFilter] = useState('')
+  const [recLoading, setRecLoad]   = useState(false)
+
+  // fetch static model metrics (unchanged)
   useEffect(() => {
     getMetrics()
       .then(d => setData(d))
       .finally(() => setLoad(false))
   }, [])
 
+  // fetch advanced metrics
+  const fetchAdv = useCallback(() => {
+    setAdvLoad(true)
+    fetch('http://127.0.0.1:5000/api/advanced-metrics')
+      .then(r => r.json())
+      .then(d => setAdv(d))
+      .catch(() => setAdv(null))
+      .finally(() => setAdvLoad(false))
+  }, [])
+
+  useEffect(() => { fetchAdv() }, [fetchAdv])
+
+  // fetch records (existing logic, unchanged)
   useEffect(() => {
     setRecLoad(true)
     getPredictions({ page: recPage, search: recSearch, prediction: recFilter })
-      .then(d => { setRecords(d.records || []); setRecTotal(d.total || 0); setRecPages(d.pages || 1) })
+      .then(d => {
+        setRecords(d.records || [])
+        setRecTotal(d.total  || 0)
+        setRecPages(d.pages  || 1)
+      })
       .catch(() => {})
       .finally(() => setRecLoad(false))
   }, [recPage, recSearch, recFilter])
 
   if (loading) return <div className="flex-1 flex items-center justify-center"><Spinner size="lg" /></div>
 
-  const barData = data.map(m => ({
-    name: SHORT(m.model),
-    fullName: m.model,
-    [METRIC_LABELS[activeMetric]]: m[activeMetric],
-    prod: m.is_production
-  }))
   
 
   const downloadCSV = async () => {
-    const res = await fetch("http://127.0.0.1:5000/api/download-metrics")
+    const res  = await fetch("http://127.0.0.1:5000/api/download-metrics")
     const blob = await res.blob()
-    const url = window.URL.createObjectURL(blob)
-    const a = document.createElement("a"); a.href = url; a.download = "model_analytics.csv"; a.click()
+    const url  = window.URL.createObjectURL(blob)
+    const a    = document.createElement("a")
+    a.href = url; a.download = "model_analytics.csv"; a.click()
   }
 
   const downloadStrokePDF = async (formData) => {
     try {
       const response = await fetch("http://127.0.0.1:5000/api/download-stroke-pdf", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(formData)
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(formData),
       })
       if (!response.ok) { const err = await response.json(); throw new Error(err.error || "Failed to generate PDF") }
       const blob = await response.blob()
       if (blob.type !== "application/pdf") throw new Error("Invalid PDF response from server")
       const url = window.URL.createObjectURL(blob)
-      const a = document.createElement("a"); a.href = url; a.download = "stroke_risk_report.pdf"
-      document.body.appendChild(a); a.click(); a.remove(); window.URL.revokeObjectURL(url)
+      const a   = document.createElement("a")
+      a.href = url; a.download = "stroke_risk_report.pdf"
+      document.body.appendChild(a); a.click(); a.remove()
+      window.URL.revokeObjectURL(url)
     } catch (error) { alert("Failed to download PDF: " + error.message) }
   }
 
   return (
     <div className="flex-1 p-6 max-w-6xl mx-auto w-full animate-fade-up">
+
+      {/* ── Header (unchanged) ── */}
       <div className="flex justify-between items-center mb-6">
         <PageHeader title="Model Analytics" subtitle="Performance comparison of all 7 trained models" />
-        <button onClick={downloadCSV} className="px-4 py-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition">Download CSV</button>
+        <button onClick={downloadCSV}
+          className="px-4 py-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition">
+          Download CSV
+        </button>
         <button
           onClick={() => {
             const payload = JSON.parse(localStorage.getItem("patientData") || "{}")
             const result  = JSON.parse(localStorage.getItem("predictionResult") || "{}")
-            if (!payload || Object.keys(payload).length === 0) { alert("No patient data found. Please run prediction first."); return }
-            downloadStrokePDF({ ...payload, prediction: result.final_prediction, probability: result.probability, risk_level: result.risk_level })
+            if (!payload || Object.keys(payload).length === 0) {
+              alert("No patient data found. Please run prediction first."); return
+            }
+            downloadStrokePDF({
+              ...payload,
+              prediction: result.final_prediction,
+              probability: result.probability,
+              risk_level:  result.risk_level,
+            })
           }}
           className="px-4 py-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition"
         >Download PDF</button>
       </div>
 
-      {/* Metric tabs */}
-      <div className="flex gap-2 mb-6 flex-wrap">
-        {TAB_KEYS.map(k => (
-          <button key={k} onClick={() => setActiveMetric(k)}
-            className={`px-4 py-1.5 rounded-full text-sm font-medium transition-all duration-150 ${
-              activeMetric === k ? 'bg-brand-600 text-white' : 'bg-white text-slate-600 border border-slate-200 hover:border-brand-300'
-            }`}>{METRIC_LABELS[k]}</button>
-        ))}
-      </div>
+      
 
-      <div className="card p-5 mb-6">
-      <div className="font-semibold text-slate-800 text-sm mb-4">
-        {METRIC_LABELS[activeMetric]} by Model
-      </div>
+      
 
-      <ResponsiveContainer width="100%" height={320}>
-        <BarChart data={barData}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+      {/* ── Advanced Insights (NEW — inserted between chart and records) ── */}
+      {!advLoading && adv && adv.total > 0 && (
+        <div className="card p-5 mb-6 space-y-5">
+          <div className="font-semibold text-slate-800 text-sm flex items-center justify-between">
+            Advanced Insights
+            <span className="text-xs font-normal text-slate-400">
+              {adv.total} records · {adv.batch_vs_single?.batch_count ?? 0} batch · {adv.batch_vs_single?.single_count ?? 0} individual
+            </span>
+          </div>
 
-          <XAxis
-            dataKey="name"
-            tick={{ fontSize: 11 }}
-            axisLine={false}
-            tickLine={false}
-          />
+          {/* Row 1 — Usage + Stroke Rate */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <InsightRow
+              label="Model Usage Frequency"
+              items={adv.usage_frequency}
+              valueKey="count"
+              unit=""
+              color="text-brand-600"
+            />
+            <InsightRow
+              label="Stroke Prediction Rate"
+              items={adv.stroke_rate_per_model}
+              valueKey="stroke_rate"
+              unit="%"
+              color="text-red-500"
+            />
+          </div>
 
-          <YAxis
-            domain={[0, 100]}
-            unit="%"
-            axisLine={false}
-            tickLine={false}
-          />
+          {/* Row 2 — Avg Risk + Confidence Distribution */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <InsightRow
+              label="Avg Risk Score per Model"
+              items={adv.avg_risk_per_model}
+              valueKey="avg_probability"
+              unit="%"
+              color="text-amber-600"
+            />
+            <div>
+              <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+                Confidence Distribution
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {adv.confidence_distribution?.map((b, i) => (
+                  <div key={i} className="bg-slate-50 border border-slate-100 rounded-xl px-3 py-2 text-center min-w-[64px]">
+                    <div className="text-sm font-bold text-teal-600">{b.count}</div>
+                    <div className="text-[10px] text-slate-400 mt-0.5">{b.range}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
 
-          <Tooltip content={<CustomTooltip />} />
+          {/* Row 3 — Batch vs Individual */}
+          {adv.batch_vs_single && (
+            <div>
+              <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+                Batch vs Individual
+              </div>
+              <div className="flex flex-wrap gap-3">
+                {[
+                  { label: 'Ind. Avg Risk',    value: adv.batch_vs_single.single_avg_risk,    unit: '%', color: 'text-brand-600' },
+                  { label: 'Batch Avg Risk',   value: adv.batch_vs_single.batch_avg_risk,     unit: '%', color: 'text-purple-600' },
+                  { label: 'Ind. Stroke Rate', value: adv.batch_vs_single.single_stroke_rate, unit: '%', color: 'text-red-500' },
+                  { label: 'Batch Stroke Rate',value: adv.batch_vs_single.batch_stroke_rate,  unit: '%', color: 'text-orange-500' },
+                ].map((item, i) => (
+                  <div key={i} className="bg-slate-50 border border-slate-100 rounded-xl px-4 py-2.5 text-center min-w-[90px]">
+                    <div className={`text-sm font-bold ${item.color}`}>{item.value}{item.unit}</div>
+                    <div className="text-[10px] text-slate-400 mt-0.5">{item.label}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
-          <Bar
-            dataKey={METRIC_LABELS[activeMetric]}
-            fill="#0a78ed"
-            radius={[6, 6, 0, 0]}
-          />
-        </BarChart>
-      </ResponsiveContainer>
-    </div>
-      {/* ── Prediction Records Table (dynamic from SQL) ── */}
+      {/* ── Prediction Records table (unchanged) ── */}
       <div className="card overflow-hidden">
         <div className="px-5 py-4 border-b border-slate-100 font-semibold text-slate-800 text-sm flex items-center gap-3 flex-wrap">
           Prediction Records
@@ -186,21 +266,23 @@ export default function Analytics() {
         {recLoading ? (
           <div className="flex items-center justify-center py-12"><Spinner /></div>
         ) : records.length === 0 ? (
-          <div className="text-center py-12 text-slate-400 text-sm">No records saved yet. Use Save Data on the Patient Analysis page.</div>
+          <div className="text-center py-12 text-slate-400 text-sm">
+            No records saved yet. Use Save Data on the Patient Analysis page.
+          </div>
         ) : (
           <>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-slate-50 border-b border-slate-100">
-                    {['ID','Patient ID','Age','Gender','Prediction','Probability','LR','DT','RF','RF+S','XGB','Cat','LGB','Timestamp'].map(h => (
+                    {['ID','Patient ID','Age','Gender','Prediction','Probability','LR','DT','RF','RF+S','XGB','Cat','LGB','Source','Timestamp'].map(h => (
                       <th key={h} className="px-3 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
-                  {records.map(r => (
-                    <tr key={r.id} className="hover:bg-slate-50 transition-colors">
+                  {records.map((r, idx) => (
+                    <tr key={idx} className="hover:bg-slate-50 transition-colors">
                       <td className="px-3 py-2.5 font-mono text-xs text-slate-500">{r.id}</td>
                       <td className="px-3 py-2.5 text-xs text-slate-600">{r.patient_id || '—'}</td>
                       <td className="px-3 py-2.5 text-xs text-slate-600">{r.age}</td>
@@ -218,6 +300,11 @@ export default function Analytics() {
                           </span>
                         </td>
                       ))}
+                      <td className="px-3 py-2.5">
+                        <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-md ${r.source === 'batch' ? 'bg-purple-50 text-purple-600' : 'bg-brand-50 text-brand-600'}`}>
+                          {r.source === 'batch' ? 'Batch' : 'Single'}
+                        </span>
+                      </td>
                       <td className="px-3 py-2.5 text-[10px] text-slate-400 whitespace-nowrap">
                         {r.timestamp ? new Date(r.timestamp).toLocaleString() : '—'}
                       </td>
@@ -226,7 +313,6 @@ export default function Analytics() {
                 </tbody>
               </table>
             </div>
-            {/* Pagination */}
             <div className="flex items-center justify-between px-5 py-3 border-t border-slate-100">
               <span className="text-xs text-slate-400">Page {recPage} of {recPages}</span>
               <div className="flex gap-2">
