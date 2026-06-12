@@ -4,7 +4,12 @@ import PageHeader from '../components/PageHeader'
 import RiskGauge from '../components/RiskGauge'
 import Spinner from '../components/Spinner'
 import { getRiskColor, getPredictionColor } from '../utils/helpers'
-import { AlertCircle, CheckCircle2, ChevronRight, RotateCcw, Brain, ShieldAlert, Save } from 'lucide-react'
+import {
+  AlertCircle, CheckCircle2, ChevronRight, RotateCcw,
+  Brain, ShieldAlert, Save, Search, UserPlus
+} from 'lucide-react'
+
+const API = 'http://127.0.0.1:5000/api'
 
 const INITIAL = {
   id: '', gender: '', age: '', hypertension: '',
@@ -51,13 +56,55 @@ export default function Predict() {
   const [saving,  setSaving]  = useState(false)
   const [saved,   setSaved]   = useState(false)
 
+  // ── Patient lookup state ──────────────────────────────────────────────────
+  const [lookupId,      setLookupId]      = useState('')
+  const [lookupStatus,  setLookupStatus]  = useState(null)   // null | 'found' | 'not-found' | 'new'
+  const [lookupLoading, setLookupLoading] = useState(false)
+  const [generatedId,   setGeneratedId]   = useState(null)   // shown after save for new patient
+
   const handleChange = e => setForm(p => ({ ...p, [e.target.name]: e.target.value }))
+
+  // ── Look up an existing patient ───────────────────────────────────────────
+  const handleLookup = async () => {
+    const pid = lookupId.trim()
+    if (!pid) return
+    setLookupLoading(true); setLookupStatus(null)
+    try {
+      const res  = await fetch(`${API}/check-patient`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ patient_id: pid }),
+      })
+      const data = await res.json()
+      if (data.exists && data.patient) {
+        const p = data.patient
+        setForm(prev => ({
+          ...prev,
+          id:                p.patient_id || prev.id,
+          gender:            p.gender            || prev.gender,
+          age:               p.age               ?? prev.age,
+          hypertension:      p.hypertension      ?? prev.hypertension,
+          heart_disease:     p.heart_disease     ?? prev.heart_disease,
+          ever_married:      p.ever_married      || prev.ever_married,
+          work_type:         p.work_type         || prev.work_type,
+          Residence_type:    p.residence_type    || prev.Residence_type,
+          avg_glucose_level: p.avg_glucose_level ?? prev.avg_glucose_level,
+          bmi:               p.bmi               ?? prev.bmi,
+          smoking_status:    p.smoking_status    || prev.smoking_status,
+        }))
+        setLookupStatus('found')
+      } else {
+        setLookupStatus('not-found')
+      }
+    } catch {
+      setLookupStatus('not-found')
+    } finally {
+      setLookupLoading(false)
+    }
+  }
 
   const handleSubmit = async e => {
     e.preventDefault()
-    setError(null)
-    setLoading(true)
-    setSaved(false)
+    setError(null); setLoading(true); setSaved(false); setGeneratedId(null)
     try {
       const res = await predict(form)
       setResult(res)
@@ -74,8 +121,12 @@ export default function Predict() {
     if (!result || saving || saved) return
     setSaving(true)
     try {
-      await savePrediction({ patient: form, result })
+      const res = await savePrediction({ patient: form, result })
       setSaved(true)
+      // If backend returned a generated patient_id, surface it
+      if (res?.patient_id && !form.id) {
+        setGeneratedId(res.patient_id)
+      }
     } catch (err) {
       alert('Save failed: ' + (err.response?.data?.error ?? err.message))
     } finally {
@@ -86,30 +137,24 @@ export default function Predict() {
   const downloadPDF = async () => {
     if (!result) return
     try {
-      const payload = {
-        ...form,
-        prediction: result.final_prediction,
-        probability: result.probability,
-        risk_level: result.risk_level,
-        explanation: result.explanation
-      }
+      const payload = { ...form, prediction: result.final_prediction,
+        probability: result.probability, risk_level: result.risk_level, explanation: result.explanation }
       const response = await fetch("http://127.0.0.1:5000/api/download-stroke-pdf", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
       })
       if (!response.ok) { const err = await response.json(); throw new Error(err.error || "PDF failed") }
       const blob = await response.blob()
-      const url = window.URL.createObjectURL(blob)
-      const a = document.createElement("a")
+      const url  = window.URL.createObjectURL(blob)
+      const a    = document.createElement("a")
       a.href = url; a.download = "stroke_risk_report.pdf"; a.click()
       window.URL.revokeObjectURL(url)
-    } catch (err) {
-      alert("PDF Error: " + err.message)
-    }
+    } catch (err) { alert("PDF Error: " + err.message) }
   }
 
-  const reset = () => { setForm(INITIAL); setResult(null); setError(null); setSaved(false) }
+  const reset = () => {
+    setForm(INITIAL); setResult(null); setError(null); setSaved(false)
+    setLookupId(''); setLookupStatus(null); setGeneratedId(null)
+  }
 
   const riskColor = result ? getRiskColor(result.risk_level) : null
   const predColor = result ? getPredictionColor(result.final_prediction) : null
@@ -125,6 +170,47 @@ export default function Predict() {
           </button>
         )}
       />
+
+      {/* ── Patient Lookup Bar (NEW — above form) ── */}
+      {!result && (
+        <div className="card p-4 mb-4">
+          <div className="flex items-center gap-2 mb-2">
+            <UserPlus className="w-4 h-4 text-brand-500" />
+            <span className="text-sm font-semibold text-slate-700">Existing Patient Lookup</span>
+            <span className="text-xs text-slate-400 font-normal ml-1">(optional — leave blank for new patient)</span>
+          </div>
+          <div className="flex gap-2">
+            <input
+              value={lookupId}
+              onChange={e => { setLookupId(e.target.value); setLookupStatus(null) }}
+              onKeyDown={e => e.key === 'Enter' && handleLookup()}
+              placeholder="Enter existing Patient ID, e.g. STR20260001"
+              className="input-field flex-1 text-sm"
+            />
+            <button
+              onClick={handleLookup}
+              disabled={!lookupId.trim() || lookupLoading}
+              className="btn-secondary shrink-0 gap-1.5"
+            >
+              {lookupLoading ? <Spinner size="sm" /> : <Search className="w-4 h-4" />}
+              Lookup
+            </button>
+          </div>
+
+          {lookupStatus === 'found' && (
+            <div className="flex items-center gap-2 mt-2 text-emerald-700 text-xs">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              Patient found — form auto-filled. You can update values before predicting.
+            </div>
+          )}
+          {lookupStatus === 'not-found' && (
+            <div className="flex items-center gap-2 mt-2 text-amber-600 text-xs">
+              <AlertCircle className="w-3.5 h-3.5" />
+              Patient ID not found. Fill in details to create a new record.
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
         {/* Form */}
@@ -169,12 +255,10 @@ export default function Predict() {
         {result && (
           <div className="lg:col-span-2 space-y-4 animate-fade-up">
 
-            {/* Download Report — below Analyze Risk */}
             <button onClick={downloadPDF} className="btn-primary w-full justify-center">
               Download Report
             </button>
 
-            {/* Save Data button */}
             <button
               onClick={handleSave}
               disabled={saving || saved}
@@ -192,6 +276,14 @@ export default function Predict() {
                 <><Save className="w-4 h-4" /> Save Data</>
               )}
             </button>
+
+            {/* Generated Patient ID banner */}
+            {generatedId && (
+              <div className="p-3 rounded-xl bg-brand-50 border border-brand-100 text-xs text-brand-700 flex items-center gap-2">
+                <UserPlus className="w-3.5 h-3.5 shrink-0" />
+                New Patient ID generated: <span className="font-mono font-bold">{generatedId}</span>
+              </div>
+            )}
 
             {/* Main result */}
             <div className={`card p-5 border ${predColor.border}`}>

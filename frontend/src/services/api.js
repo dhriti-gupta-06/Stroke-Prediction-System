@@ -5,8 +5,7 @@ const api = axios.create({ baseURL: '/api' })
 export const getDashboard        = ()       => api.get('/dashboard').then(r => r.data)
 export const getMetrics          = ()       => api.get('/metrics').then(r => r.data)
 export const getModelPerformance = ()       => api.get('/model-performance').then(r => r.data)
-export const getAnalyticsMetrics = () =>
-  api.get('/advanced-metrics').then(r => r.data)
+export const getAnalyticsMetrics = ()       => api.get('/advanced-metrics').then(r => r.data)
 
 export const predict = (data) => api.post('/predict', data).then(r => r.data)
 
@@ -40,3 +39,14 @@ export const saveBatchPredictions = (results) =>
 
 export const getPredictions = ({ page = 1, per_page = 20, search = '', prediction = '' } = {}) =>
   api.get('/predictions', { params: { page, per_page, search, prediction } }).then(r => r.data)
+
+// ── NEW ──────────────────────────────────────────────────────────────────────
+
+export const checkPatient = (patient_id) =>
+  api.post('/check-patient', { patient_id }).then(r => r.data)
+
+export const getPatient = (patient_id) =>
+  api.get(`/patient/${encodeURIComponent(patient_id)}`).then(r => r.data)
+
+export const generatePatientId = () =>
+  api.get('/generate-patient-id').then(r => r.data)

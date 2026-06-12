@@ -1,11 +1,10 @@
 import { useEffect, useState, useCallback } from 'react'
-import { getMetrics, getPredictions, getAnalyticsMetrics } from '../services/api'
+import { getPredictions } from '../services/api'
 import PageHeader from '../components/PageHeader'
 import Spinner from '../components/Spinner'
+import PatientModal from '../components/PatientModal'
 import { Search, ChevronLeft, ChevronRight as ChevRight } from 'lucide-react'
-import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
-} from 'recharts'
+
 
 
 
@@ -13,22 +12,8 @@ const SHORT = n =>
   n.replace('Random Forest + SMOTE', 'RF+SMOTE').replace('Random Forest', 'RF')
    .replace('Logistic Regression', 'LogReg').replace('Decision Tree', 'DecTree')
 
-const CustomTooltip = ({ active, payload, label }) => {
-  if (!active || !payload?.length) return null
-  return (
-    <div className="bg-white border border-slate-200 rounded-xl shadow-lg p-3 text-xs">
-      <div className="font-semibold text-slate-700 mb-1.5">{label}</div>
-      {payload.map(p => (
-        <div key={p.name} className="flex justify-between gap-4">
-          <span className="text-slate-500">{p.name}</span>
-          <span className="font-semibold" style={{ color: p.color }}>{p.value}%</span>
-        </div>
-      ))}
-    </div>
-  )
-}
 
-// ── Compact insight card ──────────────────────────────────────────────────────
+
 function InsightRow({ label, items, valueKey, labelKey = 'model', unit = '', color = 'text-brand-600' }) {
   if (!items?.length) return null
   return (
@@ -37,9 +22,7 @@ function InsightRow({ label, items, valueKey, labelKey = 'model', unit = '', col
       <div className="flex flex-wrap gap-2">
         {items.map((item, i) => (
           <div key={i} className="bg-slate-50 border border-slate-100 rounded-xl px-3 py-2 text-center min-w-[80px]">
-            <div className={`text-sm font-bold ${color}`}>
-              {item[valueKey]}{unit}
-            </div>
+            <div className={`text-sm font-bold ${color}`}>{item[valueKey]}{unit}</div>
             <div className="text-[10px] text-slate-400 mt-0.5 leading-tight">{SHORT(item[labelKey])}</div>
           </div>
         ))}
@@ -49,16 +32,11 @@ function InsightRow({ label, items, valueKey, labelKey = 'model', unit = '', col
 }
 
 export default function Analytics() {
-  // ── Static metrics (existing) ─────────────────────────────────────────────
-  const [data,         setData]        = useState([])
-  const [loading,      setLoad]        = useState(true)
-  
 
-  // ── Advanced metrics (new) ────────────────────────────────────────────────
-  const [adv,       setAdv]       = useState(null)
+
+  const [adv,        setAdv]      = useState(null)
   const [advLoading, setAdvLoad]  = useState(true)
 
-  // ── Records table (existing) ──────────────────────────────────────────────
   const [records,    setRecords]   = useState([])
   const [recPage,    setRecPage]   = useState(1)
   const [recTotal,   setRecTotal]  = useState(0)
@@ -67,39 +45,28 @@ export default function Analytics() {
   const [recFilter,  setRecFilter] = useState('')
   const [recLoading, setRecLoad]   = useState(false)
 
-  // fetch static model metrics (unchanged)
-  useEffect(() => {
-    getMetrics()
-      .then(d => setData(d))
-      .finally(() => setLoad(false))
-  }, [])
+  // ── Modal state ───────────────────────────────────────────────────────────
+  const [modalPid, setModalPid] = useState(null)
 
-  // fetch advanced metrics
+  
+
   const fetchAdv = useCallback(() => {
     setAdvLoad(true)
     fetch('http://127.0.0.1:5000/api/advanced-metrics')
-      .then(r => r.json())
-      .then(d => setAdv(d))
-      .catch(() => setAdv(null))
+      .then(r => r.json()).then(d => setAdv(d)).catch(() => setAdv(null))
       .finally(() => setAdvLoad(false))
   }, [])
-
   useEffect(() => { fetchAdv() }, [fetchAdv])
 
-  // fetch records (existing logic, unchanged)
   useEffect(() => {
     setRecLoad(true)
     getPredictions({ page: recPage, search: recSearch, prediction: recFilter })
-      .then(d => {
-        setRecords(d.records || [])
-        setRecTotal(d.total  || 0)
-        setRecPages(d.pages  || 1)
-      })
+      .then(d => { setRecords(d.records || []); setRecTotal(d.total || 0); setRecPages(d.pages || 1) })
       .catch(() => {})
       .finally(() => setRecLoad(false))
   }, [recPage, recSearch, recFilter])
 
-  if (loading) return <div className="flex-1 flex items-center justify-center"><Spinner size="lg" /></div>
+  
 
   
 
@@ -114,8 +81,7 @@ export default function Analytics() {
   const downloadStrokePDF = async (formData) => {
     try {
       const response = await fetch("http://127.0.0.1:5000/api/download-stroke-pdf", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(formData),
       })
       if (!response.ok) { const err = await response.json(); throw new Error(err.error || "Failed to generate PDF") }
       const blob = await response.blob()
@@ -123,15 +89,17 @@ export default function Analytics() {
       const url = window.URL.createObjectURL(blob)
       const a   = document.createElement("a")
       a.href = url; a.download = "stroke_risk_report.pdf"
-      document.body.appendChild(a); a.click(); a.remove()
-      window.URL.revokeObjectURL(url)
+      document.body.appendChild(a); a.click(); a.remove(); window.URL.revokeObjectURL(url)
     } catch (error) { alert("Failed to download PDF: " + error.message) }
   }
 
   return (
     <div className="flex-1 p-6 max-w-6xl mx-auto w-full animate-fade-up">
 
-      {/* ── Header (unchanged) ── */}
+      {/* Modal */}
+      {modalPid && <PatientModal patientId={modalPid} onClose={() => setModalPid(null)} />}
+
+      {/* Header */}
       <div className="flex justify-between items-center mb-6">
         <PageHeader title="Model Analytics" subtitle="Performance comparison of all 7 trained models" />
         <button onClick={downloadCSV}
@@ -145,12 +113,8 @@ export default function Analytics() {
             if (!payload || Object.keys(payload).length === 0) {
               alert("No patient data found. Please run prediction first."); return
             }
-            downloadStrokePDF({
-              ...payload,
-              prediction: result.final_prediction,
-              probability: result.probability,
-              risk_level:  result.risk_level,
-            })
+            downloadStrokePDF({ ...payload, prediction: result.final_prediction,
+              probability: result.probability, risk_level: result.risk_level })
           }}
           className="px-4 py-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition"
         >Download PDF</button>
@@ -160,7 +124,7 @@ export default function Analytics() {
 
       
 
-      {/* ── Advanced Insights (NEW — inserted between chart and records) ── */}
+      {/* Advanced Insights */}
       {!advLoading && adv && adv.total > 0 && (
         <div className="card p-5 mb-6 space-y-5">
           <div className="font-semibold text-slate-800 text-sm flex items-center justify-between">
@@ -169,38 +133,14 @@ export default function Analytics() {
               {adv.total} records · {adv.batch_vs_single?.batch_count ?? 0} batch · {adv.batch_vs_single?.single_count ?? 0} individual
             </span>
           </div>
-
-          {/* Row 1 — Usage + Stroke Rate */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            <InsightRow
-              label="Model Usage Frequency"
-              items={adv.usage_frequency}
-              valueKey="count"
-              unit=""
-              color="text-brand-600"
-            />
-            <InsightRow
-              label="Stroke Prediction Rate"
-              items={adv.stroke_rate_per_model}
-              valueKey="stroke_rate"
-              unit="%"
-              color="text-red-500"
-            />
+            <InsightRow label="Model Usage Frequency"  items={adv.usage_frequency}       valueKey="count"        color="text-brand-600" />
+            <InsightRow label="Stroke Prediction Rate" items={adv.stroke_rate_per_model}  valueKey="stroke_rate"  unit="%" color="text-red-500" />
           </div>
-
-          {/* Row 2 — Avg Risk + Confidence Distribution */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            <InsightRow
-              label="Avg Risk Score per Model"
-              items={adv.avg_risk_per_model}
-              valueKey="avg_probability"
-              unit="%"
-              color="text-amber-600"
-            />
+            <InsightRow label="Avg Risk Score per Model" items={adv.avg_risk_per_model} valueKey="avg_probability" unit="%" color="text-amber-600" />
             <div>
-              <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
-                Confidence Distribution
-              </div>
+              <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Confidence Distribution</div>
               <div className="flex flex-wrap gap-2">
                 {adv.confidence_distribution?.map((b, i) => (
                   <div key={i} className="bg-slate-50 border border-slate-100 rounded-xl px-3 py-2 text-center min-w-[64px]">
@@ -211,19 +151,15 @@ export default function Analytics() {
               </div>
             </div>
           </div>
-
-          {/* Row 3 — Batch vs Individual */}
           {adv.batch_vs_single && (
             <div>
-              <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
-                Batch vs Individual
-              </div>
+              <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Batch vs Individual</div>
               <div className="flex flex-wrap gap-3">
                 {[
-                  { label: 'Ind. Avg Risk',    value: adv.batch_vs_single.single_avg_risk,    unit: '%', color: 'text-brand-600' },
-                  { label: 'Batch Avg Risk',   value: adv.batch_vs_single.batch_avg_risk,     unit: '%', color: 'text-purple-600' },
-                  { label: 'Ind. Stroke Rate', value: adv.batch_vs_single.single_stroke_rate, unit: '%', color: 'text-red-500' },
-                  { label: 'Batch Stroke Rate',value: adv.batch_vs_single.batch_stroke_rate,  unit: '%', color: 'text-orange-500' },
+                  { label: 'Ind. Avg Risk',     value: adv.batch_vs_single.single_avg_risk,    unit: '%', color: 'text-brand-600' },
+                  { label: 'Batch Avg Risk',    value: adv.batch_vs_single.batch_avg_risk,     unit: '%', color: 'text-purple-600' },
+                  { label: 'Ind. Stroke Rate',  value: adv.batch_vs_single.single_stroke_rate, unit: '%', color: 'text-red-500' },
+                  { label: 'Batch Stroke Rate', value: adv.batch_vs_single.batch_stroke_rate,  unit: '%', color: 'text-orange-500' },
                 ].map((item, i) => (
                   <div key={i} className="bg-slate-50 border border-slate-100 rounded-xl px-4 py-2.5 text-center min-w-[90px]">
                     <div className={`text-sm font-bold ${item.color}`}>{item.value}{item.unit}</div>
@@ -236,7 +172,7 @@ export default function Analytics() {
         </div>
       )}
 
-      {/* ── Prediction Records table (unchanged) ── */}
+      {/* Prediction Records */}
       <div className="card overflow-hidden">
         <div className="px-5 py-4 border-b border-slate-100 font-semibold text-slate-800 text-sm flex items-center gap-3 flex-wrap">
           Prediction Records
@@ -244,18 +180,14 @@ export default function Analytics() {
           <div className="ml-auto flex gap-2 flex-wrap">
             <div className="relative">
               <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input
-                value={recSearch}
+              <input value={recSearch}
                 onChange={e => { setRecSearch(e.target.value); setRecPage(1) }}
                 placeholder="Search patient…"
-                className="pl-8 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-brand-400 w-40"
-              />
+                className="pl-8 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-brand-400 w-40" />
             </div>
-            <select
-              value={recFilter}
+            <select value={recFilter}
               onChange={e => { setRecFilter(e.target.value); setRecPage(1) }}
-              className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:border-brand-400"
-            >
+              className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:border-brand-400">
               <option value="">All Predictions</option>
               <option value="Stroke">Stroke</option>
               <option value="No Stroke">No Stroke</option>
@@ -284,7 +216,21 @@ export default function Analytics() {
                   {records.map((r, idx) => (
                     <tr key={idx} className="hover:bg-slate-50 transition-colors">
                       <td className="px-3 py-2.5 font-mono text-xs text-slate-500">{r.id}</td>
-                      <td className="px-3 py-2.5 text-xs text-slate-600">{r.patient_id || '—'}</td>
+
+                      {/* ── Clickable Patient ID ── */}
+                      <td className="px-3 py-2.5">
+                        {r.patient_id ? (
+                          <button
+                            onClick={() => setModalPid(r.patient_id)}
+                            className="text-xs font-medium text-brand-600 hover:text-brand-800 hover:underline underline-offset-2 transition-colors"
+                          >
+                            {r.patient_id}
+                          </button>
+                        ) : (
+                          <span className="text-xs text-slate-400">—</span>
+                        )}
+                      </td>
+
                       <td className="px-3 py-2.5 text-xs text-slate-600">{r.age}</td>
                       <td className="px-3 py-2.5 text-xs text-slate-600">{r.gender}</td>
                       <td className="px-3 py-2.5">
