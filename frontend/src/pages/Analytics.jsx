@@ -252,7 +252,17 @@ export default function Analytics() {
                         </span>
                       </td>
                       <td className="px-3 py-2.5 text-[10px] text-slate-400 whitespace-nowrap">
-                        {r.timestamp ? new Date(r.timestamp).toLocaleString() : '—'}
+                        {r.timestamp
+                        ? new Date(r.timestamp).toLocaleString('en-IN', {
+                            day: '2-digit',
+                            month: '2-digit',
+                            year: 'numeric',
+                            hour: 'numeric',
+                            minute: '2-digit',
+                            second: '2-digit',
+                            hour12: true
+                          })
+                        : '—'}
                       </td>
                     </tr>
                   ))}

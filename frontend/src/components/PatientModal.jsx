@@ -14,6 +14,19 @@ function InfoRow({ label, value }) {
     </div>
   )
 }
+const formatDate = (date) => {
+  if (!date) return '—'
+
+  return new Date(date).toLocaleString('en-IN', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true
+  })
+}
 
 export default function PatientModal({ patientId, onClose }) {
   const [data,    setData]    = useState(null)
@@ -95,7 +108,7 @@ export default function PatientModal({ patientId, onClose }) {
                   <InfoRow label="Avg Glucose Level"  value={data.patient.avg_glucose_level ? `${data.patient.avg_glucose_level} mg/dL` : null} />
                   <InfoRow label="BMI"                value={data.patient.bmi} />
                   <InfoRow label="Smoking Status"     value={data.patient.smoking_status} />
-                  <InfoRow label="First Recorded"     value={data.patient.created_at} />
+                  <InfoRow label="First Recorded"     value={formatDate(data.patient.created_at)} />
                 </div>
               </div>
 
@@ -119,7 +132,7 @@ export default function PatientModal({ patientId, onClose }) {
                             {latest.prediction}
                           </div>
                           <div className="text-xs text-slate-500 mt-0.5">
-                            Risk: <strong>{latest.risk_score}%</strong> · Model: {latest.model} · Source: {latest.source} · {latest.date}
+                            Risk: <strong>{latest.risk_score}%</strong> · Model: {latest.model} · Source: {latest.source} · {formatDate(latest.date)}
                           </div>
                         </div>
                       </div>
@@ -154,7 +167,7 @@ export default function PatientModal({ patientId, onClose }) {
                       <tbody className="divide-y divide-slate-50">
                         {data.prediction_history.map((h, i) => (
                           <tr key={i} className="hover:bg-slate-50 transition-colors">
-                            <td className="px-3 py-2.5 text-slate-500 whitespace-nowrap">{h.date || '—'}</td>
+                            <td className="px-3 py-2.5 text-slate-500 whitespace-nowrap">{formatDate(h.date)}</td>
                             <td className="px-3 py-2.5 text-slate-600 font-medium">{h.model}</td>
                             <td className="px-3 py-2.5 font-semibold text-slate-700">{h.risk_score}%</td>
                             <td className="px-3 py-2.5">
