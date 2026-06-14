@@ -447,9 +447,9 @@ def save_prediction():
         def mp(name, key):
             return models.get(name, {}).get(key)
 
-        # ── Upsert PatientPrediction (existing table, unchanged behaviour) ───
-        existing = PatientPrediction.query.filter_by(patient_id=pid).first()
-        fields = dict(
+        # ── Always INSERT a new prediction record (never overwrite history) ──
+        record = PatientPrediction(
+            patient_id        = pid,
             gender            = patient.get("gender"),
             age               = float(patient.get("age", 0) or 0),
             hypertension      = int(patient.get("hypertension", 0) or 0),
@@ -479,33 +479,26 @@ def save_prediction():
             prob_lightgbm             = mp("LightGBM",               "probability"),
             timestamp                 = datetime.datetime.utcnow(),
         )
-        if existing:
-            for k, v in fields.items():
-                setattr(existing, k, v)
-            record = existing
-        else:
-            record = PatientPrediction(patient_id=pid, **fields)
-            db.session.add(record)
+        db.session.add(record)
 
-        # ── Also write to Patient + PredictionHistory (new tables) ───────────
+        # ── Upsert patient profile (separate concern — does NOT affect prediction history) ──
         _upsert_patient_profile(pid, patient)
-        history = PredictionHistory(
+
+        # ── Append to prediction history ──
+        db.session.add(PredictionHistory(
             patient_id        = pid,
             prediction_result = result.get("final_prediction"),
             risk_score        = float(result.get("probability", 0) or 0),
             confidence_score  = result.get("risk_level"),
             model_used        = "LightGBM",
             prediction_source = "single",
-        )
-        db.session.add(history)
+        ))
 
         db.session.commit()
-        return jsonify({"success": True, "id": record.id, "patient_id": pid, "updated": existing is not None})
+        return jsonify({"success": True, "id": record.id, "patient_id": pid})
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
-
-
 # ─── API: Save Batch Predictions (upsert + history) ──────────────────────────
 @app.route("/api/save-batch-predictions", methods=["POST"])
 def save_batch_predictions():
@@ -515,10 +508,12 @@ def save_batch_predictions():
         batch_id = str(uuid.uuid4())[:8].upper()
         now      = datetime.datetime.utcnow()
 
-        saved = updated = 0
         for row in results:
             pid = str(row.get("id", "")).strip()
-            fields = dict(
+
+            # ── Always INSERT a new batch prediction record ──
+            db.session.add(BatchPrediction(
+                patient_id        = pid,
                 batch_id          = batch_id,
                 gender            = row.get("gender"),
                 age               = float(row.get("age", 0) or 0),
@@ -542,18 +537,15 @@ def save_batch_predictions():
                 pred_lightgbm             = row.get("pred_lightgbm"),
                 upload_timestamp  = now,
                 record_timestamp  = now,
-            )
-            existing = BatchPrediction.query.filter_by(patient_id=pid).first()
-            if existing:
-                for k, v in fields.items():
-                    setattr(existing, k, v)
-                updated += 1
-            else:
-                db.session.add(BatchPrediction(patient_id=pid, **fields))
-                saved += 1
+            ))
 
-            # Write to Patient + PredictionHistory
-            _upsert_patient_profile(pid, {**row, "Residence_type": row.get("Residence_type") or row.get("residence_type")})
+            # ── Upsert patient profile ──
+            _upsert_patient_profile(
+                pid,
+                {**row, "Residence_type": row.get("Residence_type") or row.get("residence_type")}
+            )
+
+            # ── Append to prediction history ──
             db.session.add(PredictionHistory(
                 patient_id        = pid,
                 prediction_result = row.get("Prediction"),
@@ -564,11 +556,10 @@ def save_batch_predictions():
             ))
 
         db.session.commit()
-        return jsonify({"success": True, "batch_id": batch_id, "saved": saved, "updated": updated})
+        return jsonify({"success": True, "batch_id": batch_id, "saved": len(results)})
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
-
 
 # ─── API: Fetch Unified Prediction Records (paginated) ───────────────────────
 @app.route("/api/predictions", methods=["GET"])

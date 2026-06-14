@@ -207,7 +207,7 @@ export default function Analytics() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-slate-50 border-b border-slate-100">
-                    {['ID','Patient ID','Age','Gender','Prediction','Probability','LR','DT','RF','RF+S','XGB','Cat','LGB','Source','Timestamp'].map(h => (
+                    {['Rec ID','Patient ID','Age','Gender','Prediction','Probability','LR','DT','RF','RF+S','XGB','Cat','LGB','Source','Timestamp'].map(h => (
                       <th key={h} className="px-3 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
