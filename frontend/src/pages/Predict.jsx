@@ -171,47 +171,7 @@ export default function Predict() {
         )}
       />
 
-      {/* ── Patient Lookup Bar (NEW — above form) ── */}
-      {!result && (
-        <div className="card p-4 mb-4">
-          <div className="flex items-center gap-2 mb-2">
-            <UserPlus className="w-4 h-4 text-brand-500" />
-            <span className="text-sm font-semibold text-slate-700">Existing Patient Lookup</span>
-            <span className="text-xs text-slate-400 font-normal ml-1">(optional — leave blank for new patient)</span>
-          </div>
-          <div className="flex gap-2">
-            <input
-              value={lookupId}
-              onChange={e => { setLookupId(e.target.value); setLookupStatus(null) }}
-              onKeyDown={e => e.key === 'Enter' && handleLookup()}
-              placeholder="Enter existing Patient ID, e.g. STR20260001"
-              className="input-field flex-1 text-sm"
-            />
-            <button
-              onClick={handleLookup}
-              disabled={!lookupId.trim() || lookupLoading}
-              className="btn-secondary shrink-0 gap-1.5"
-            >
-              {lookupLoading ? <Spinner size="sm" /> : <Search className="w-4 h-4" />}
-              Lookup
-            </button>
-          </div>
-
-          {lookupStatus === 'found' && (
-            <div className="flex items-center gap-2 mt-2 text-emerald-700 text-xs">
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              Patient found — form auto-filled. You can update values before predicting.
-            </div>
-          )}
-          {lookupStatus === 'not-found' && (
-            <div className="flex items-center gap-2 mt-2 text-amber-600 text-xs">
-              <AlertCircle className="w-3.5 h-3.5" />
-              Patient ID not found. Fill in details to create a new record.
-            </div>
-          )}
-        </div>
-      )}
-
+      
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
         {/* Form */}
         <div className={`${result ? 'lg:col-span-3' : 'lg:col-span-5'} card p-6`}>
