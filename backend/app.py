@@ -599,6 +599,10 @@ def get_predictions():
     all_rows = [single_to_dict(r) for r in q_single.all()] + [batch_to_dict(r) for r in q_batch.all()]
     all_rows.sort(key=lambda x: x.get("timestamp") or "", reverse=True)
 
+
+    for idx, row in enumerate(all_rows, start=1):
+        row["record_id"] = idx
+
     total = len(all_rows)
     start = (page - 1) * per_page
     return jsonify({

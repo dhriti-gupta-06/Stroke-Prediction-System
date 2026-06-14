@@ -215,7 +215,7 @@ export default function Analytics() {
                 <tbody className="divide-y divide-slate-50">
                   {records.map((r, idx) => (
                     <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                      <td className="px-3 py-2.5 font-mono text-xs text-slate-500">{r.id}</td>
+                      <td className="px-3 py-2.5 font-mono text-xs text-slate-500">{r.record_id}</td>
 
                       {/* ── Clickable Patient ID ── */}
                       <td className="px-3 py-2.5">
