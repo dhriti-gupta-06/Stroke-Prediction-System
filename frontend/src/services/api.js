@@ -2,6 +2,26 @@ import axios from 'axios'
 
 const api = axios.create({ baseURL: '/api' })
 
+// Attach JWT to every request automatically
+api.interceptors.request.use(config => {
+  const token = localStorage.getItem('ns_token')
+  if (token) config.headers['Authorization'] = `Bearer ${token}`
+  return config
+})
+
+// Redirect to login on 401
+api.interceptors.response.use(
+  r => r,
+  err => {
+    if (err.response?.status === 401) {
+      localStorage.removeItem('ns_token')
+      localStorage.removeItem('ns_username')
+      window.location.href = '/login'
+    }
+    return Promise.reject(err)
+  }
+)
+
 export const getDashboard        = ()       => api.get('/dashboard').then(r => r.data)
 export const getMetrics          = ()       => api.get('/metrics').then(r => r.data)
 export const getModelPerformance = ()       => api.get('/model-performance').then(r => r.data)
@@ -40,13 +60,8 @@ export const saveBatchPredictions = (results) =>
 export const getPredictions = ({ page = 1, per_page = 20, search = '', prediction = '' } = {}) =>
   api.get('/predictions', { params: { page, per_page, search, prediction } }).then(r => r.data)
 
-// ── NEW ──────────────────────────────────────────────────────────────────────
-
-export const checkPatient = (patient_id) =>
-  api.post('/check-patient', { patient_id }).then(r => r.data)
-
-export const getPatient = (patient_id) =>
-  api.get(`/patient/${encodeURIComponent(patient_id)}`).then(r => r.data)
-
-export const generatePatientId = () =>
-  api.get('/generate-patient-id').then(r => r.data)
+export const checkPatient    = (patient_id) => api.post('/check-patient', { patient_id }).then(r => r.data)
+export const getPatient      = (patient_id) => api.get(`/patient/${encodeURIComponent(patient_id)}`).then(r => r.data)
+export const generatePatientId = ()         => api.get('/generate-patient-id').then(r => r.data)
+export const getMe           = ()           => api.get('/me').then(r => r.data)
+export const getUserStats    = ()           => api.get('/user-stats').then(r => r.data)

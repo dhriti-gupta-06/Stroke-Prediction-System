@@ -1,21 +1,22 @@
-import { NavLink, useLocation } from 'react-router-dom'
+import { NavLink } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
 import {
   LayoutDashboard, UserSearch, Upload,
-  BarChart3, Info, Activity, TrendingUp
+  BarChart3, Info, Activity, TrendingUp, LogOut
 } from 'lucide-react'
 
 const NAV = [
-  { to: '/',                icon: LayoutDashboard, label: 'Dashboard'          },
-  { to: '/predict',         icon: UserSearch,      label: 'Patient Analysis'   },
-  { to: '/batch',           icon: Upload,          label: 'Batch Prediction'   },
-  { to: '/analytics',       icon: BarChart3,       label: 'Model Analytics'    },
-  { to: '/model-performance', icon: TrendingUp,    label: 'Model Performance'  },
-  { to: '/about',           icon: Info,            label: 'About'              },
+  { to: '/',                  icon: LayoutDashboard, label: 'Dashboard'         },
+  { to: '/predict',           icon: UserSearch,      label: 'Patient Analysis'  },
+  { to: '/batch',             icon: Upload,          label: 'Batch Prediction'  },
+  { to: '/analytics',         icon: BarChart3,       label: 'Model Analytics'   },
+  { to: '/model-performance', icon: TrendingUp,      label: 'Model Performance' },
+  { to: '/about',             icon: Info,            label: 'About'             },
 ]
 
-// rest of component unchanged
-
 export default function Sidebar() {
+  const { username, logout } = useAuth()
+
   return (
     <aside className="hidden md:flex flex-col w-56 shrink-0 bg-white border-r border-slate-100 h-screen sticky top-0">
       {/* Brand */}
@@ -50,8 +51,21 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      {/* Footer */}
-      <div className="px-4 py-4 border-t border-slate-100">
+      {/* Footer — user + logout */}
+      <div className="px-4 py-4 border-t border-slate-100 space-y-2">
+        {username && (
+          <div className="rounded-xl bg-slate-50 border border-slate-100 px-3 py-2.5">
+            <div className="text-[10px] text-slate-400 uppercase tracking-wide mb-0.5">Logged in as</div>
+            <div className="text-xs font-semibold text-slate-700 truncate">{username}</div>
+          </div>
+        )}
+        <button
+          onClick={logout}
+          className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-medium text-slate-500 hover:text-red-600 hover:bg-red-50 transition-all duration-150"
+        >
+          <LogOut className="w-4 h-4 shrink-0" />
+          Sign Out
+        </button>
         <div className="rounded-xl bg-brand-50 border border-brand-100 p-3">
           <div className="text-xs font-semibold text-brand-700">LightGBM Active</div>
           <div className="text-[11px] text-brand-500 mt-0.5">Production model · v1.0</div>

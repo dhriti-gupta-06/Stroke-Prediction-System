@@ -127,45 +127,151 @@ export default function Analytics() {
       {/* Advanced Insights */}
       {!advLoading && adv && adv.total > 0 && (
         <div className="card p-5 mb-6 space-y-5">
+
+          {/* Header */}
           <div className="font-semibold text-slate-800 text-sm flex items-center justify-between">
             Advanced Insights
             <span className="text-xs font-normal text-slate-400">
               {adv.total} records · {adv.batch_vs_single?.batch_count ?? 0} batch · {adv.batch_vs_single?.single_count ?? 0} individual
             </span>
           </div>
+
+          {/* Model + Stroke Rate */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            <InsightRow label="Model Usage Frequency"  items={adv.usage_frequency}       valueKey="count"        color="text-brand-600" />
-            <InsightRow label="Stroke Prediction Rate" items={adv.stroke_rate_per_model}  valueKey="stroke_rate"  unit="%" color="text-red-500" />
+            <InsightRow
+              label="Model Usage Frequency"
+              items={adv.usage_frequency}
+              valueKey="count"
+              color="text-brand-600"
+            />
+            <InsightRow
+              label="Stroke Prediction Rate"
+              items={adv.stroke_rate_per_model}
+              valueKey="stroke_rate"
+              unit="%"
+              color="text-red-500"
+            />
           </div>
+
+          {/* Avg Risk + Confidence Distribution */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            <InsightRow label="Avg Risk Score per Model" items={adv.avg_risk_per_model} valueKey="avg_probability" unit="%" color="text-amber-600" />
+
+            <InsightRow
+              label="Avg Risk Score per Model"
+              items={adv.avg_risk_per_model}
+              valueKey="avg_probability"
+              unit="%"
+              color="text-amber-600"
+            />
+
+            {/* Confidence Distribution */}
             <div>
-              <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Confidence Distribution</div>
+              <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+                Confidence Distribution
+              </div>
+
               <div className="flex flex-wrap gap-2">
                 {adv.confidence_distribution?.map((b, i) => (
-                  <div key={i} className="bg-slate-50 border border-slate-100 rounded-xl px-3 py-2 text-center min-w-[64px]">
-                    <div className="text-sm font-bold text-teal-600">{b.count}</div>
-                    <div className="text-[10px] text-slate-400 mt-0.5">{b.range}</div>
+                  <div
+                    key={i}
+                    className="bg-slate-50 border border-slate-100 rounded-xl px-3 py-2 text-center min-w-[64px]"
+                  >
+                    <div className="text-sm font-bold text-teal-600">
+                      {b.count}
+                    </div>
+                    <div className="text-[10px] text-slate-400 mt-0.5">
+                      {b.range}
+                    </div>
                   </div>
                 ))}
               </div>
             </div>
           </div>
+
+          {/* Batch vs Individual */}
           {adv.batch_vs_single && (
             <div>
-              <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Batch vs Individual</div>
+              <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+                Batch vs Individual
+              </div>
+
               <div className="flex flex-wrap gap-3">
                 {[
-                  { label: 'Ind. Avg Risk',     value: adv.batch_vs_single.single_avg_risk,    unit: '%', color: 'text-brand-600' },
-                  { label: 'Batch Avg Risk',    value: adv.batch_vs_single.batch_avg_risk,     unit: '%', color: 'text-purple-600' },
-                  { label: 'Ind. Stroke Rate',  value: adv.batch_vs_single.single_stroke_rate, unit: '%', color: 'text-red-500' },
-                  { label: 'Batch Stroke Rate', value: adv.batch_vs_single.batch_stroke_rate,  unit: '%', color: 'text-orange-500' },
+                  {
+                    label: "Ind. Avg Risk",
+                    value: adv.batch_vs_single.single_avg_risk,
+                    unit: "%",
+                    color: "text-brand-600",
+                  },
+                  {
+                    label: "Batch Avg Risk",
+                    value: adv.batch_vs_single.batch_avg_risk,
+                    unit: "%",
+                    color: "text-purple-600",
+                  },
+                  {
+                    label: "Ind. Stroke Rate",
+                    value: adv.batch_vs_single.single_stroke_rate,
+                    unit: "%",
+                    color: "text-red-500",
+                  },
+                  {
+                    label: "Batch Stroke Rate",
+                    value: adv.batch_vs_single.batch_stroke_rate,
+                    unit: "%",
+                    color: "text-orange-500",
+                  },
                 ].map((item, i) => (
-                  <div key={i} className="bg-slate-50 border border-slate-100 rounded-xl px-4 py-2.5 text-center min-w-[90px]">
-                    <div className={`text-sm font-bold ${item.color}`}>{item.value}{item.unit}</div>
-                    <div className="text-[10px] text-slate-400 mt-0.5">{item.label}</div>
+                  <div
+                    key={i}
+                    className="bg-slate-50 border border-slate-100 rounded-xl px-4 py-2.5 text-center min-w-[90px]"
+                  >
+                    <div className={`text-sm font-bold ${item.color}`}>
+                      {item.value}
+                      {item.unit}
+                    </div>
+                    <div className="text-[10px] text-slate-400 mt-0.5">
+                      {item.label}
+                    </div>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* ✅ USER STATS (CORRECT POSITION - AFTER batch_vs_single) */}
+          {adv.user_stats?.length > 0 && (
+            <div>
+              <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+                Predictions per User
+              </div>
+
+              <div className="overflow-x-auto rounded-xl border border-slate-100">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-100">
+                      <th className="px-3 py-2 text-left font-semibold text-slate-500 uppercase tracking-wide">
+                        Username
+                      </th>
+                      <th className="px-3 py-2 text-right font-semibold text-slate-500 uppercase tracking-wide">
+                        Predictions
+                      </th>
+                    </tr>
+                  </thead>
+
+                  <tbody className="divide-y divide-slate-50">
+                    {adv.user_stats.map((u, i) => (
+                      <tr key={i} className="hover:bg-slate-50">
+                        <td className="px-3 py-2 font-medium text-slate-700">
+                          {u.username}
+                        </td>
+                        <td className="px-3 py-2 text-right font-semibold text-brand-600">
+                          {u.predictions}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
           )}
@@ -207,7 +313,7 @@ export default function Analytics() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-slate-50 border-b border-slate-100">
-                    {['Rec ID','Patient ID','Age','Gender','Prediction','Probability','LR','DT','RF','RF+S','XGB','Cat','LGB','Source','Timestamp'].map(h => (
+                    {['Rec ID','Username','Patient ID','Age','Gender','Prediction','Probability','LR','DT','RF','RF+S','XGB','Cat','LGB','Source','Timestamp'].map(h => (
                       <th key={h} className="px-3 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -216,6 +322,11 @@ export default function Analytics() {
                   {records.map((r, idx) => (
                     <tr key={idx} className="hover:bg-slate-50 transition-colors">
                       <td className="px-3 py-2.5 font-mono text-xs text-slate-500">{r.record_id}</td>
+                      <td className="px-3 py-2.5">
+                        <span className="text-xs font-medium text-slate-600 bg-slate-100 px-2 py-0.5 rounded-lg">
+                          {r.created_by || 'system'}
+                        </span>
+                      </td>
 
                       {/* ── Clickable Patient ID ── */}
                       <td className="px-3 py-2.5">

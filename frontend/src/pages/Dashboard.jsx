@@ -4,6 +4,7 @@ import { getDashboard } from '../services/api'
 import Spinner from '../components/Spinner'
 import PageHeader from '../components/PageHeader'
 import { Activity, UserSearch, Upload, BarChart3, CheckCircle2, Crown, Target } from 'lucide-react'
+import { useAuth } from '../context/AuthContext'
 
 const MODEL_COLORS = {
   'LightGBM': 'bg-brand-600', 'XGBoost': 'bg-purple-500', 'CatBoost': 'bg-teal-500',
@@ -21,8 +22,10 @@ function MetricPill({ label, value }) {
 }
 
 export default function Dashboard() {
+  const { username } = useAuth()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
+  
 
   useEffect(() => {
     getDashboard()
@@ -51,6 +54,12 @@ export default function Dashboard() {
           </Link>
         }
       />
+      {username && (
+        <div className="mb-4 flex items-center gap-2 text-sm text-slate-500">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block"></span>
+          Logged in as <span className="font-semibold text-slate-700">{username}</span>
+        </div>
+      )}
 
       {/* Quick Actions */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">

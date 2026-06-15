@@ -6,6 +6,9 @@ from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 import datetime
 import uuid
+import jwt
+import bcrypt
+from functools import wraps
 
 import joblib
 import pandas as pd
@@ -17,13 +20,17 @@ from utils.predictor import preprocess_input
 from utils.explanation import generate_explanation
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/api/*": {"origins": "*"}},
+     supports_credentials=True)
 
-# ─── Database ────────────────────────────────────────────────────────────────
+# ─── Config ──────────────────────────────────────────────────────────────────
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///stroke_predictions.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['JWT_SECRET_KEY'] = 'neuralstroke-jwt-secret-2026-change-in-production'
+JWT_ALGORITHM  = 'HS256'
+JWT_EXPIRY_HRS = 12
 
-from database import db, PatientPrediction, BatchPrediction, Patient, PredictionHistory
+from database import db, PatientPrediction, BatchPrediction, Patient, PredictionHistory, User
 db.init_app(app)
 
 with app.app_context():
@@ -54,7 +61,57 @@ MODEL_NAMES = [
     "Random Forest + SMOTE", "XGBoost", "CatBoost", "LightGBM"
 ]
 
-# ─── Helpers ─────────────────────────────────────────────────────────────────
+# ─── JWT Helpers ─────────────────────────────────────────────────────────────
+
+def create_token(username):
+    payload = {
+        'sub': username,
+        'iat': datetime.datetime.utcnow(),
+        'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=JWT_EXPIRY_HRS),
+    }
+    return jwt.encode(payload, app.config['JWT_SECRET_KEY'], algorithm=JWT_ALGORITHM)
+
+
+def decode_token(token):
+    return jwt.decode(token, app.config['JWT_SECRET_KEY'], algorithms=[JWT_ALGORITHM])
+
+
+def jwt_required(f):
+    """Decorator: require valid JWT. Injects current_username into kwargs."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth = request.headers.get('Authorization', '')
+        if not auth.startswith('Bearer '):
+            return jsonify({'error': 'Missing or invalid Authorization header'}), 401
+        token = auth.split(' ', 1)[1]
+        try:
+            payload = decode_token(token)
+            kwargs['current_username'] = payload['sub']
+        except jwt.ExpiredSignatureError:
+            return jsonify({'error': 'Token expired. Please log in again.'}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({'error': 'Invalid token.'}), 401
+        return f(*args, **kwargs)
+    return decorated
+
+
+def optional_jwt(f):
+    """Decorator: extract username if JWT present, else None. Never rejects."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth = request.headers.get('Authorization', '')
+        username = None
+        if auth.startswith('Bearer '):
+            try:
+                payload = decode_token(auth.split(' ', 1)[1])
+                username = payload['sub']
+            except Exception:
+                pass
+        kwargs['current_username'] = username
+        return f(*args, **kwargs)
+    return decorated
+
+# ─── ML Helpers ──────────────────────────────────────────────────────────────
 
 def get_risk_level(prob):
     if prob < 15:   return "Low"
@@ -78,18 +135,12 @@ def run_all_models(patient):
 
 
 def generate_patient_id():
-    """
-    Generate next sequential Patient ID in format STR<YEAR><SEQUENCE4>.
-    e.g. STR20260001, STR20260002 …
-    Thread-safe within a single SQLite process (SQLAlchemy session lock).
-    """
     year   = datetime.datetime.utcnow().year
     prefix = f"STR{year}"
-    # Find the highest existing sequence for this year
-    last = (Patient.query
-            .filter(Patient.patient_id.like(f"{prefix}%"))
-            .order_by(Patient.patient_id.desc())
-            .first())
+    last   = (Patient.query
+               .filter(Patient.patient_id.like(f"{prefix}%"))
+               .order_by(Patient.patient_id.desc())
+               .first())
     if last:
         try:
             seq = int(last.patient_id[len(prefix):]) + 1
@@ -101,7 +152,6 @@ def generate_patient_id():
 
 
 def _upsert_patient_profile(pid, patient_data):
-    """Create or update a Patient profile row. Returns the Patient object."""
     existing = Patient.query.filter_by(patient_id=pid).first()
     fields = dict(
         gender            = patient_data.get("gender"),
@@ -178,6 +228,36 @@ def _compute_cm_metrics(preds, ground_truth):
         round(2*tp / (2*tp + fp + fn) * 100, 2)    if (2*tp+fp+fn) else 0,
     )
 
+# ─── API: Auth ────────────────────────────────────────────────────────────────
+
+@app.route("/api/login", methods=["POST"])
+def login():
+    data     = request.get_json()
+    username = (data.get("username") or "").strip()
+    password = (data.get("password") or "").strip()
+
+    if not username or not password:
+        return jsonify({"error": "Username and password are required."}), 400
+
+    user = User.query.filter_by(username=username).first()
+    if not user:
+        return jsonify({"error": "Invalid username or password."}), 401
+
+    if not bcrypt.checkpw(password.encode('utf-8'), user.password_hash.encode('utf-8')):
+        return jsonify({"error": "Invalid username or password."}), 401
+
+    token = create_token(username)
+    return jsonify({"token": token, "username": username})
+
+
+@app.route("/api/me", methods=["GET"])
+@jwt_required
+def me(current_username):
+    user = User.query.filter_by(username=current_username).first()
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    return jsonify(user.to_dict())
+
 
 # ─── API: Dashboard ──────────────────────────────────────────────────────────
 @app.route("/api/dashboard", methods=["GET"])
@@ -229,8 +309,8 @@ def get_metrics():
 # ─── API: Analytics Metrics from DB ──────────────────────────────────────────
 @app.route("/api/analytics-metrics", methods=["GET"])
 def analytics_metrics():
-    all_records = _unified_records()
-    total       = len(all_records)
+    all_records  = _unified_records()
+    total        = len(all_records)
     empty_models = [{"model": n, "accuracy": 0, "precision": 0, "recall": 0, "f1_score": 0} for n in MODEL_NAMES]
     if total == 0:
         return jsonify({"total": 0, "stroke": 0, "no_stroke": 0, "model_metrics": empty_models})
@@ -253,7 +333,8 @@ def analytics_metrics():
         acc, prec, rec, f1 = _compute_cm_metrics(list(preds), list(gt))
         model_metrics.append({"model": name, "accuracy": acc, "precision": prec, "recall": rec, "f1_score": f1})
 
-    return jsonify({"total": total, "stroke": stroke_count, "no_stroke": total - stroke_count, "model_metrics": model_metrics})
+    return jsonify({"total": total, "stroke": stroke_count,
+                    "no_stroke": total - stroke_count, "model_metrics": model_metrics})
 
 
 # ─── API: Advanced Metrics ────────────────────────────────────────────────────
@@ -289,7 +370,7 @@ def advanced_metrics():
 
     bins, counts = ["0–20%","20–40%","40–60%","60–80%","80–100%"], [0,0,0,0,0]
     for r in all_records:
-        p = r["prob"]
+        p   = r["prob"]
         idx = min(int(p // 20), 4)
         counts[idx] += 1
     confidence_distribution = [{"range": b, "count": c} for b, c in zip(bins, counts)]
@@ -309,6 +390,18 @@ def advanced_metrics():
     _ap = lambda recs: round(sum(r["prob"] for r in recs)/len(recs), 2) if recs else 0
     _sr = lambda recs: round(sum(1 for r in recs if r["final"]=="Stroke")/len(recs)*100, 2) if recs else 0
 
+    # ── User stats (never expose passwords) ──────────────────────────────────
+    users = User.query.all()
+    user_stats = []
+    for u in users:
+        single_count = PatientPrediction.query.filter_by(created_by=u.username).count()
+        batch_count  = BatchPrediction.query.filter_by(created_by=u.username).count()
+        user_stats.append({
+            "username":    u.username,
+            "predictions": single_count + batch_count,
+        })
+    user_stats.sort(key=lambda x: x["predictions"], reverse=True)
+
     return jsonify({
         "total":                    total,
         "usage_frequency":          usage_frequency,
@@ -324,6 +417,8 @@ def advanced_metrics():
             "single_stroke_rate": _sr(single_records),
             "batch_stroke_rate":  _sr(batch_records),
         },
+        "user_stats":               user_stats,
+        "total_users":              len(users),
     })
 
 
@@ -377,12 +472,7 @@ def batch_predict():
     file  = request.files["file"]
     fname = file.filename.lower()
     try:
-        if fname.endswith(".csv"):
-            df_input = pd.read_csv(file)
-        elif fname.endswith((".xlsx", ".xls")):
-            df_input = pd.read_excel(file)
-        else:
-            return jsonify({"error": "Only CSV or Excel files are supported"}), 400
+        df_input = pd.read_csv(file) if fname.endswith(".csv") else pd.read_excel(file)
     except Exception as e:
         return jsonify({"error": f"Could not read file: {str(e)}"}), 400
 
@@ -424,8 +514,9 @@ def batch_predict():
             }
         except Exception:
             pred, pct, risk, model_preds = "Error", 0.0, "Unknown", {}
-        results.append({**{k: row[k] for k in df_input.columns}, "Prediction": pred,
-                         "Probability": pct, "Risk_Category": risk, **model_preds})
+        results.append({**{k: row[k] for k in df_input.columns},
+                        "Prediction": pred, "Probability": pct,
+                        "Risk_Category": risk, **model_preds})
 
     stroke_count    = sum(1 for r in results if r["Prediction"] == "Stroke")
     no_stroke_count = sum(1 for r in results if r["Prediction"] == "No Stroke")
@@ -434,9 +525,10 @@ def batch_predict():
                     "no_stroke_count": no_stroke_count, "avg_probability": avg_prob, "results": results})
 
 
-# ─── API: Save Individual Prediction (upsert + history) ──────────────────────
+# ─── API: Save Individual Prediction ─────────────────────────────────────────
 @app.route("/api/save-prediction", methods=["POST"])
-def save_prediction():
+@optional_jwt
+def save_prediction(current_username):
     try:
         data    = request.get_json()
         patient = data.get("patient", {})
@@ -447,9 +539,9 @@ def save_prediction():
         def mp(name, key):
             return models.get(name, {}).get(key)
 
-        # ── Always INSERT a new prediction record (never overwrite history) ──
         record = PatientPrediction(
             patient_id        = pid,
+            created_by        = current_username,    # ← username from JWT
             gender            = patient.get("gender"),
             age               = float(patient.get("age", 0) or 0),
             hypertension      = int(patient.get("hypertension", 0) or 0),
@@ -480,11 +572,7 @@ def save_prediction():
             timestamp                 = datetime.datetime.utcnow(),
         )
         db.session.add(record)
-
-        # ── Upsert patient profile (separate concern — does NOT affect prediction history) ──
         _upsert_patient_profile(pid, patient)
-
-        # ── Append to prediction history ──
         db.session.add(PredictionHistory(
             patient_id        = pid,
             prediction_result = result.get("final_prediction"),
@@ -493,15 +581,17 @@ def save_prediction():
             model_used        = "LightGBM",
             prediction_source = "single",
         ))
-
         db.session.commit()
         return jsonify({"success": True, "id": record.id, "patient_id": pid})
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
-# ─── API: Save Batch Predictions (upsert + history) ──────────────────────────
+
+
+# ─── API: Save Batch Predictions ─────────────────────────────────────────────
 @app.route("/api/save-batch-predictions", methods=["POST"])
-def save_batch_predictions():
+@optional_jwt
+def save_batch_predictions(current_username):
     try:
         data     = request.get_json()
         results  = data.get("results", [])
@@ -510,10 +600,9 @@ def save_batch_predictions():
 
         for row in results:
             pid = str(row.get("id", "")).strip()
-
-            # ── Always INSERT a new batch prediction record ──
             db.session.add(BatchPrediction(
                 patient_id        = pid,
+                created_by        = current_username,   # ← username from JWT
                 batch_id          = batch_id,
                 gender            = row.get("gender"),
                 age               = float(row.get("age", 0) or 0),
@@ -538,14 +627,10 @@ def save_batch_predictions():
                 upload_timestamp  = now,
                 record_timestamp  = now,
             ))
-
-            # ── Upsert patient profile ──
             _upsert_patient_profile(
                 pid,
                 {**row, "Residence_type": row.get("Residence_type") or row.get("residence_type")}
             )
-
-            # ── Append to prediction history ──
             db.session.add(PredictionHistory(
                 patient_id        = pid,
                 prediction_result = row.get("Prediction"),
@@ -561,6 +646,7 @@ def save_batch_predictions():
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
 
+
 # ─── API: Fetch Unified Prediction Records (paginated) ───────────────────────
 @app.route("/api/predictions", methods=["GET"])
 def get_predictions():
@@ -575,6 +661,7 @@ def get_predictions():
             PatientPrediction.patient_id.ilike(f"%{search}%"),
             PatientPrediction.gender.ilike(f"%{search}%"),
             PatientPrediction.smoking_status.ilike(f"%{search}%"),
+            PatientPrediction.created_by.ilike(f"%{search}%"),
         ))
     if filter_pred:
         q_single = q_single.filter(PatientPrediction.final_prediction == filter_pred)
@@ -585,6 +672,7 @@ def get_predictions():
             BatchPrediction.patient_id.ilike(f"%{search}%"),
             BatchPrediction.gender.ilike(f"%{search}%"),
             BatchPrediction.smoking_status.ilike(f"%{search}%"),
+            BatchPrediction.created_by.ilike(f"%{search}%"),
         ))
     if filter_pred:
         q_batch = q_batch.filter(BatchPrediction.final_prediction == filter_pred)
@@ -599,7 +687,6 @@ def get_predictions():
     all_rows = [single_to_dict(r) for r in q_single.all()] + [batch_to_dict(r) for r in q_batch.all()]
     all_rows.sort(key=lambda x: x.get("timestamp") or "", reverse=True)
 
-
     for idx, row in enumerate(all_rows, start=1):
         row["record_id"] = idx
 
@@ -612,7 +699,24 @@ def get_predictions():
     })
 
 
-# ─── API: NEW — Check existing patient ───────────────────────────────────────
+# ─── API: User stats ─────────────────────────────────────────────────────────
+@app.route("/api/user-stats", methods=["GET"])
+@jwt_required
+def user_stats(current_username):
+    users = User.query.all()
+    stats = []
+    for u in users:
+        single_count = PatientPrediction.query.filter_by(created_by=u.username).count()
+        batch_count  = BatchPrediction.query.filter_by(created_by=u.username).count()
+        stats.append({
+            "username":    u.username,
+            "predictions": single_count + batch_count,
+        })
+    stats.sort(key=lambda x: x["predictions"], reverse=True)
+    return jsonify({"users": stats, "total": len(stats)})
+
+
+# ─── API: Check existing patient ─────────────────────────────────────────────
 @app.route("/api/check-patient", methods=["POST"])
 def check_patient():
     data = request.get_json()
@@ -625,13 +729,10 @@ def check_patient():
     return jsonify({"exists": True, "patient": patient.to_dict()})
 
 
-# ─── API: NEW — Get patient details + full history ───────────────────────────
+# ─── API: Get patient details + full history ──────────────────────────────────
 @app.route("/api/patient/<patient_id>", methods=["GET"])
 def get_patient(patient_id):
     patient = Patient.query.filter_by(patient_id=patient_id).first()
-
-    # Also search PatientPrediction and BatchPrediction for the demographic data
-    # (covers patients saved before the new Patient table existed)
     if not patient:
         pp = PatientPrediction.query.filter_by(patient_id=patient_id).first()
         bp = BatchPrediction.query.filter_by(patient_id=patient_id).first()
@@ -655,69 +756,50 @@ def get_patient(patient_id):
     else:
         profile = patient.to_dict()
 
-    # Gather all predictions from both legacy tables
     single_preds = PatientPrediction.query.filter_by(patient_id=patient_id).all()
     batch_preds  = BatchPrediction.query.filter_by(patient_id=patient_id).all()
-
-    history = []
+    history      = []
     for r in single_preds:
         d = r.to_dict()
-        history.append({
-            "date":       d.get("timestamp"),
-            "model":      "LightGBM",
-            "risk_score": d.get("probability"),
-            "prediction": d.get("final_prediction"),
-            "source":     "Single",
-        })
+        history.append({"date": d.get("timestamp"), "model": "LightGBM",
+                         "risk_score": d.get("probability"), "prediction": d.get("final_prediction"),
+                         "source": "Single", "created_by": d.get("created_by", "system")})
     for r in batch_preds:
         d = r.to_dict()
-        history.append({
-            "date":       d.get("record_timestamp") or d.get("upload_timestamp"),
-            "model":      "LightGBM",
-            "risk_score": d.get("probability"),
-            "prediction": d.get("final_prediction"),
-            "source":     "Batch",
-        })
+        history.append({"date": d.get("record_timestamp") or d.get("upload_timestamp"),
+                         "model": "LightGBM", "risk_score": d.get("probability"),
+                         "prediction": d.get("final_prediction"),
+                         "source": "Batch", "created_by": d.get("created_by", "system")})
 
-    # Also include PredictionHistory entries (new table)
     ph_rows = PredictionHistory.query.filter_by(patient_id=patient_id).order_by(PredictionHistory.created_at.desc()).all()
     for r in ph_rows:
         d = r.to_dict()
-        history.append({
-            "date":       d.get("created_at"),
-            "model":      d.get("model_used"),
-            "risk_score": d.get("risk_score"),
-            "prediction": d.get("prediction_result"),
-            "source":     d.get("prediction_source", "").capitalize(),
-        })
+        history.append({"date": d.get("created_at"), "model": d.get("model_used"),
+                         "risk_score": d.get("risk_score"), "prediction": d.get("prediction_result"),
+                         "source": d.get("prediction_source", "").capitalize(), "created_by": None})
 
-    # Deduplicate by (date, prediction) and sort newest first
-    seen = set()
-    unique_history = []
+    seen, unique_history = set(), []
     for h in history:
         key = (h["date"], h["prediction"], h["risk_score"])
         if key not in seen:
-            seen.add(key)
-            unique_history.append(h)
+            seen.add(key); unique_history.append(h)
     unique_history.sort(key=lambda x: x.get("date") or "", reverse=True)
-
     return jsonify({"patient": profile, "prediction_history": unique_history})
 
 
-# ─── API: NEW — Generate patient ID ──────────────────────────────────────────
+# ─── API: Generate patient ID ─────────────────────────────────────────────────
 @app.route("/api/generate-patient-id", methods=["GET"])
 def api_generate_patient_id():
-    pid = generate_patient_id()
-    return jsonify({"patient_id": pid})
+    return jsonify({"patient_id": generate_patient_id()})
 
 
-# ─── API: Model Performance ──────────────────────────────────────────────────
+# ─── API: Model Performance ───────────────────────────────────────────────────
 @app.route("/api/model-performance", methods=["GET"])
 def model_performance():
     return get_metrics()
 
 
-# ─── API: Download Batch Results ────────────────────────────────────────────
+# ─── API: Download Batch Results ─────────────────────────────────────────────
 @app.route("/api/batch-download", methods=["POST"])
 def batch_download():
     data    = request.get_json()
@@ -733,7 +815,7 @@ def batch_download():
         as_attachment=True, download_name="stroke_predictions.xlsx")
 
 
-# ─── API: Sample Template ───────────────────────────────────────────────────
+# ─── API: Sample Template ────────────────────────────────────────────────────
 @app.route("/api/sample-template", methods=["GET"])
 def sample_template():
     sample = pd.DataFrame([{
@@ -753,7 +835,7 @@ def sample_template():
         as_attachment=True, download_name="sample_template.xlsx")
 
 
-# ─── API: Download Metrics CSV ──────────────────────────────────────────────
+# ─── API: Download Metrics CSV ───────────────────────────────────────────────
 @app.route("/api/download-metrics")
 def download_metrics():
     rows = [{"Model": n,
@@ -776,19 +858,19 @@ def download_stroke_pdf():
     if not data:
         return jsonify({"error": "No input data received"}), 400
 
-    patient = {k: data.get(k, "") for k in
-               ["id","gender","age","hypertension","heart_disease","ever_married",
-                "work_type","Residence_type","avg_glucose_level","bmi","smoking_status"]}
+    patient     = {k: data.get(k, "") for k in
+                   ["id","gender","age","hypertension","heart_disease","ever_married",
+                    "work_type","Residence_type","avg_glucose_level","bmi","smoking_status"]}
     prediction  = data.get("prediction",  "Unknown")
     probability = data.get("probability", 0)
     risk_level  = data.get("risk_level",  "Unknown")
     explanation = data.get("explanation", [])
 
-    # Fetch history for the patient (for PDF history section)
     history_lines = ""
     pid = str(data.get("id", "")).strip()
     if pid:
-        ph_rows = PredictionHistory.query.filter_by(patient_id=pid).order_by(PredictionHistory.created_at.desc()).limit(10).all()
+        ph_rows = PredictionHistory.query.filter_by(patient_id=pid) \
+                      .order_by(PredictionHistory.created_at.desc()).limit(10).all()
         if ph_rows:
             history_lines = "\n\nPrevious Predictions:\n"
             for h in ph_rows:

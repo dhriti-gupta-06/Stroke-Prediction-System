@@ -8,3 +8,17 @@ xgboost
 catboost
 joblib
 openpyxl
+flask
+flask-cors
+flask-sqlalchemy
+pandas
+numpy
+scikit-learn
+lightgbm
+xgboost
+catboost
+joblib
+openpyxl
+reportlab
+PyJWT
+bcrypt

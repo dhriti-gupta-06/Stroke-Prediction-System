@@ -1,14 +1,18 @@
-import { Routes, Route } from 'react-router-dom'
-import Sidebar from './components/Sidebar'
-import Topbar  from './components/Topbar'
+import { Routes, Route, Navigate } from 'react-router-dom'
+import { AuthProvider, useAuth } from './context/AuthContext'
+import Sidebar          from './components/Sidebar'
+import Topbar           from './components/Topbar'
 import Dashboard        from './pages/Dashboard'
 import Predict          from './pages/Predict'
 import Batch            from './pages/Batch'
 import Analytics        from './pages/Analytics'
 import About            from './pages/About'
 import ModelPerformance from './pages/ModelPerformance'
+import Login            from './pages/Login'
 
-export default function App() {
+function ProtectedLayout() {
+  const { isLoggedIn } = useAuth()
+  if (!isLoggedIn) return <Navigate to="/login" replace />
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-slate-50">
       <Sidebar />
@@ -21,8 +25,27 @@ export default function App() {
           <Route path="/analytics"          element={<Analytics        />} />
           <Route path="/model-performance"  element={<ModelPerformance />} />
           <Route path="/about"              element={<About            />} />
+          <Route path="*"                   element={<Navigate to="/" replace />} />
         </Routes>
       </main>
     </div>
+  )
+}
+
+function AppRoutes() {
+  const { isLoggedIn } = useAuth()
+  return (
+    <Routes>
+      <Route path="/login" element={isLoggedIn ? <Navigate to="/" replace /> : <Login />} />
+      <Route path="/*"     element={<ProtectedLayout />} />
+    </Routes>
+  )
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppRoutes />
+    </AuthProvider>
   )
 }

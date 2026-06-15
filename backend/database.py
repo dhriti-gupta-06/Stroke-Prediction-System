@@ -16,6 +16,24 @@ def to_ist(dt):
     )
 
 
+# ─── Users table ──────────────────────────────────────────────────────────────
+class User(db.Model):
+    __tablename__ = 'users'
+
+    id            = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    username      = db.Column(db.String(50), unique=True, nullable=False, index=True)
+    password_hash = db.Column(db.String(255), nullable=False)
+    created_at    = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        # NEVER expose password_hash
+        return {
+            'id':         self.id,
+            'username':   self.username,
+            'created_at': to_ist(self.created_at),
+        }
+
+
 # ─── Patient profile (one row per unique patient_id) ─────────────────────────
 class Patient(db.Model):
     __tablename__ = 'patients'
@@ -89,6 +107,7 @@ class PatientPrediction(db.Model):
 
     id                = db.Column(db.Integer, primary_key=True, autoincrement=True)
     patient_id        = db.Column(db.String(50), index=True)
+    created_by        = db.Column(db.String(50), nullable=True)   # username — nullable for old records
     gender            = db.Column(db.String(20))
     age               = db.Column(db.Float)
     hypertension      = db.Column(db.Integer)
@@ -126,6 +145,7 @@ class PatientPrediction(db.Model):
         return {
             'id':                self.id,
             'patient_id':        self.patient_id,
+            'created_by':        self.created_by or 'system',
             'gender':            self.gender,
             'age':               self.age,
             'hypertension':      self.hypertension,
@@ -157,6 +177,7 @@ class BatchPrediction(db.Model):
     id                = db.Column(db.Integer, primary_key=True, autoincrement=True)
     batch_id          = db.Column(db.String(50))
     patient_id        = db.Column(db.String(50), index=True)
+    created_by        = db.Column(db.String(50), nullable=True)   # username
     gender            = db.Column(db.String(20))
     age               = db.Column(db.Float)
     hypertension      = db.Column(db.Integer)
@@ -188,6 +209,7 @@ class BatchPrediction(db.Model):
             'id':                self.id,
             'batch_id':          self.batch_id,
             'patient_id':        self.patient_id,
+            'created_by':        self.created_by or 'system',
             'gender':            self.gender,
             'age':               self.age,
             'hypertension':      self.hypertension,
