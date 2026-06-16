@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
-import { getPredictions } from '../services/api'
+import { getPredictions, getAnalyticsMetrics } from '../services/api'
+import { useAuth } from '../context/AuthContext'
 import PageHeader from '../components/PageHeader'
 import Spinner from '../components/Spinner'
 import PatientModal from '../components/PatientModal'
@@ -32,7 +33,7 @@ function InsightRow({ label, items, valueKey, labelKey = 'model', unit = '', col
 }
 
 export default function Analytics() {
-
+  const { isAdmin } = useAuth()
 
   const [adv,        setAdv]      = useState(null)
   const [advLoading, setAdvLoad]  = useState(true)
@@ -43,6 +44,7 @@ export default function Analytics() {
   const [recPages,   setRecPages]  = useState(1)
   const [recSearch,  setRecSearch] = useState('')
   const [recFilter,  setRecFilter] = useState('')
+  const [userFilter, setUserFilter] = useState('')
   const [recLoading, setRecLoad]   = useState(false)
 
   // ── Modal state ───────────────────────────────────────────────────────────
@@ -50,21 +52,26 @@ export default function Analytics() {
 
   
 
+  const userParam = isAdmin && userFilter ? userFilter : undefined
+
   const fetchAdv = useCallback(() => {
     setAdvLoad(true)
-    fetch('http://127.0.0.1:5000/api/advanced-metrics')
-      .then(r => r.json()).then(d => setAdv(d)).catch(() => setAdv(null))
+    const params = userParam ? { user: userParam } : {}
+    getAnalyticsMetrics(params)
+      .then(d => setAdv(d)).catch(() => setAdv(null))
       .finally(() => setAdvLoad(false))
-  }, [])
+  }, [userParam])
   useEffect(() => { fetchAdv() }, [fetchAdv])
 
   useEffect(() => {
     setRecLoad(true)
-    getPredictions({ page: recPage, search: recSearch, prediction: recFilter })
+    const params = { page: recPage, search: recSearch, prediction: recFilter }
+    if (userParam) params.user = userParam
+    getPredictions(params)
       .then(d => { setRecords(d.records || []); setRecTotal(d.total || 0); setRecPages(d.pages || 1) })
       .catch(() => {})
       .finally(() => setRecLoad(false))
-  }, [recPage, recSearch, recFilter])
+  }, [recPage, recSearch, recFilter, userParam])
 
   
 
@@ -239,8 +246,8 @@ export default function Analytics() {
             </div>
           )}
 
-          {/* ✅ USER STATS (CORRECT POSITION - AFTER batch_vs_single) */}
-          {adv.user_stats?.length > 0 && (
+          {/* USER STATS — admin only */}
+          {isAdmin && adv.user_stats?.length > 0 && (
             <div>
               <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
                 Predictions per User
@@ -282,6 +289,18 @@ export default function Analytics() {
       <div className="card overflow-hidden">
         <div className="px-5 py-4 border-b border-slate-100 font-semibold text-slate-800 text-sm flex items-center gap-3 flex-wrap">
           Prediction Records
+          {isAdmin && (
+            <select
+              value={userFilter}
+              onChange={e => { setUserFilter(e.target.value); setRecPage(1) }}
+              className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:border-brand-400 font-normal"
+            >
+              <option value="">All Users</option>
+              <option value="admin">admin</option>
+              <option value="doctor1">doctor1</option>
+              <option value="doctor2">doctor2</option>
+            </select>
+          )}
           <span className="text-xs text-slate-400 font-normal">{recTotal} total records</span>
           <div className="ml-auto flex gap-2 flex-wrap">
             <div className="relative">

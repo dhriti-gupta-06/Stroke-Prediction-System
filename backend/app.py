@@ -77,7 +77,7 @@ def decode_token(token):
 
 
 def jwt_required(f):
-    """Decorator: require valid JWT. Injects current_username into kwargs."""
+    """Decorator: require valid JWT. Injects current_username and current_role into kwargs."""
     @wraps(f)
     def decorated(*args, **kwargs):
         auth = request.headers.get('Authorization', '')
@@ -86,7 +86,12 @@ def jwt_required(f):
         token = auth.split(' ', 1)[1]
         try:
             payload = decode_token(token)
-            kwargs['current_username'] = payload['sub']
+            username = payload['sub']
+            user = User.query.filter_by(username=username).first()
+            if not user:
+                return jsonify({'error': 'User not found.'}), 401
+            kwargs['current_username'] = username
+            kwargs['current_role'] = user.role or ('admin' if username == 'admin' else 'doctor')
         except jwt.ExpiredSignatureError:
             return jsonify({'error': 'Token expired. Please log in again.'}), 401
         except jwt.InvalidTokenError:
@@ -110,6 +115,18 @@ def optional_jwt(f):
         kwargs['current_username'] = username
         return f(*args, **kwargs)
     return decorated
+
+
+def _resolve_created_by_filter(current_username, current_role, requested_user=None):
+    """Return created_by filter: None = all records, str = specific user."""
+    if current_role != 'admin':
+        return current_username
+    if not requested_user:
+        return None
+    normalized = requested_user.strip().lower()
+    if normalized in ('', 'all', 'all users'):
+        return None
+    return requested_user.strip()
 
 # ─── ML Helpers ──────────────────────────────────────────────────────────────
 
@@ -175,9 +192,14 @@ def _upsert_patient_profile(pid, patient_data):
         return p
 
 
-def _unified_records():
+def _unified_records(created_by=None):
+    q_single = PatientPrediction.query
+    q_batch  = BatchPrediction.query
+    if created_by:
+        q_single = q_single.filter_by(created_by=created_by)
+        q_batch  = q_batch.filter_by(created_by=created_by)
     rows = []
-    for r in PatientPrediction.query.all():
+    for r in q_single.all():
         rows.append({
             "source":    "single",
             "final":     r.final_prediction,
@@ -197,7 +219,7 @@ def _unified_records():
             "prob_cat":  r.prob_catboost               or 0,
             "prob_lgb":  r.prob_lightgbm               or 0,
         })
-    for r in BatchPrediction.query.all():
+    for r in q_batch.all():
         rows.append({
             "source":    "batch",
             "final":     r.final_prediction,
@@ -247,7 +269,8 @@ def login():
         return jsonify({"error": "Invalid username or password."}), 401
 
     token = create_token(username)
-    return jsonify({"token": token, "username": username})
+    role  = user.role or ('admin' if username == 'admin' else 'doctor')
+    return jsonify({"token": token, "username": username, "role": role})
 
 
 @app.route("/api/me", methods=["GET"])
@@ -308,8 +331,11 @@ def get_metrics():
 
 # ─── API: Analytics Metrics from DB ──────────────────────────────────────────
 @app.route("/api/analytics-metrics", methods=["GET"])
-def analytics_metrics():
-    all_records  = _unified_records()
+@jwt_required
+def analytics_metrics(current_username, current_role):
+    requested_user = request.args.get("user", "").strip()
+    created_by     = _resolve_created_by_filter(current_username, current_role, requested_user)
+    all_records    = _unified_records(created_by)
     total        = len(all_records)
     empty_models = [{"model": n, "accuracy": 0, "precision": 0, "recall": 0, "f1_score": 0} for n in MODEL_NAMES]
     if total == 0:
@@ -339,8 +365,11 @@ def analytics_metrics():
 
 # ─── API: Advanced Metrics ────────────────────────────────────────────────────
 @app.route("/api/advanced-metrics", methods=["GET"])
-def advanced_metrics():
-    all_records   = _unified_records()
+@jwt_required
+def advanced_metrics(current_username, current_role):
+    requested_user = request.args.get("user", "").strip()
+    created_by     = _resolve_created_by_filter(current_username, current_role, requested_user)
+    all_records    = _unified_records(created_by)
     total         = len(all_records)
     model_key_map = {
         "Logistic Regression":   ("lr",  "prob_lr"),
@@ -392,6 +421,8 @@ def advanced_metrics():
 
     # ── User stats (never expose passwords) ──────────────────────────────────
     users = User.query.all()
+    if created_by:
+        users = [u for u in users if u.username == created_by]
     user_stats = []
     for u in users:
         single_count = PatientPrediction.query.filter_by(created_by=u.username).count()
@@ -417,8 +448,8 @@ def advanced_metrics():
             "single_stroke_rate": _sr(single_records),
             "batch_stroke_rate":  _sr(batch_records),
         },
-        "user_stats":               user_stats,
-        "total_users":              len(users),
+        "user_stats":               user_stats if current_role == 'admin' else [],
+        "total_users":              len(user_stats) if current_role == 'admin' else 1,
     })
 
 
@@ -527,8 +558,8 @@ def batch_predict():
 
 # ─── API: Save Individual Prediction ─────────────────────────────────────────
 @app.route("/api/save-prediction", methods=["POST"])
-@optional_jwt
-def save_prediction(current_username):
+@jwt_required
+def save_prediction(current_username, current_role):
     try:
         data    = request.get_json()
         patient = data.get("patient", {})
@@ -580,6 +611,7 @@ def save_prediction(current_username):
             confidence_score  = result.get("risk_level"),
             model_used        = "LightGBM",
             prediction_source = "single",
+            created_by        = current_username,
         ))
         db.session.commit()
         return jsonify({"success": True, "id": record.id, "patient_id": pid})
@@ -590,8 +622,8 @@ def save_prediction(current_username):
 
 # ─── API: Save Batch Predictions ─────────────────────────────────────────────
 @app.route("/api/save-batch-predictions", methods=["POST"])
-@optional_jwt
-def save_batch_predictions(current_username):
+@jwt_required
+def save_batch_predictions(current_username, current_role):
     try:
         data     = request.get_json()
         results  = data.get("results", [])
@@ -638,6 +670,7 @@ def save_batch_predictions(current_username):
                 confidence_score  = row.get("Risk_Category"),
                 model_used        = "LightGBM",
                 prediction_source = "batch",
+                created_by        = current_username,
             ))
 
         db.session.commit()
@@ -649,13 +682,18 @@ def save_batch_predictions(current_username):
 
 # ─── API: Fetch Unified Prediction Records (paginated) ───────────────────────
 @app.route("/api/predictions", methods=["GET"])
-def get_predictions():
-    page        = int(request.args.get("page", 1))
-    per_page    = int(request.args.get("per_page", 20))
-    search      = request.args.get("search", "").strip()
-    filter_pred = request.args.get("prediction", "")
+@jwt_required
+def get_predictions(current_username, current_role):
+    page           = int(request.args.get("page", 1))
+    per_page       = int(request.args.get("per_page", 20))
+    search         = request.args.get("search", "").strip()
+    filter_pred    = request.args.get("prediction", "")
+    requested_user = request.args.get("user", "").strip()
+    created_by     = _resolve_created_by_filter(current_username, current_role, requested_user)
 
     q_single = PatientPrediction.query
+    if created_by:
+        q_single = q_single.filter(PatientPrediction.created_by == created_by)
     if search:
         q_single = q_single.filter(db.or_(
             PatientPrediction.patient_id.ilike(f"%{search}%"),
@@ -667,6 +705,8 @@ def get_predictions():
         q_single = q_single.filter(PatientPrediction.final_prediction == filter_pred)
 
     q_batch = BatchPrediction.query
+    if created_by:
+        q_batch = q_batch.filter(BatchPrediction.created_by == created_by)
     if search:
         q_batch = q_batch.filter(db.or_(
             BatchPrediction.patient_id.ilike(f"%{search}%"),
@@ -702,8 +742,14 @@ def get_predictions():
 # ─── API: User stats ─────────────────────────────────────────────────────────
 @app.route("/api/user-stats", methods=["GET"])
 @jwt_required
-def user_stats(current_username):
+def user_stats(current_username, current_role):
+    requested_user = request.args.get("user", "").strip()
+    created_by     = _resolve_created_by_filter(current_username, current_role, requested_user)
     users = User.query.all()
+    if created_by:
+        users = [u for u in users if u.username == created_by]
+    elif current_role != 'admin':
+        users = [u for u in users if u.username == current_username]
     stats = []
     for u in users:
         single_count = PatientPrediction.query.filter_by(created_by=u.username).count()
@@ -731,11 +777,20 @@ def check_patient():
 
 # ─── API: Get patient details + full history ──────────────────────────────────
 @app.route("/api/patient/<patient_id>", methods=["GET"])
-def get_patient(patient_id):
+@jwt_required
+def get_patient(patient_id, current_username, current_role):
+    requested_user = request.args.get("user", "").strip()
+    created_by     = _resolve_created_by_filter(current_username, current_role, requested_user)
+
     patient = Patient.query.filter_by(patient_id=patient_id).first()
     if not patient:
-        pp = PatientPrediction.query.filter_by(patient_id=patient_id).first()
-        bp = BatchPrediction.query.filter_by(patient_id=patient_id).first()
+        pp_q = PatientPrediction.query.filter_by(patient_id=patient_id)
+        bp_q = BatchPrediction.query.filter_by(patient_id=patient_id)
+        if created_by:
+            pp_q = pp_q.filter_by(created_by=created_by)
+            bp_q = bp_q.filter_by(created_by=created_by)
+        pp = pp_q.first()
+        bp = bp_q.first()
         source_row = pp or bp
         if not source_row:
             return jsonify({"error": "Patient not found"}), 404
@@ -756,8 +811,13 @@ def get_patient(patient_id):
     else:
         profile = patient.to_dict()
 
-    single_preds = PatientPrediction.query.filter_by(patient_id=patient_id).all()
-    batch_preds  = BatchPrediction.query.filter_by(patient_id=patient_id).all()
+    single_q = PatientPrediction.query.filter_by(patient_id=patient_id)
+    batch_q  = BatchPrediction.query.filter_by(patient_id=patient_id)
+    if created_by:
+        single_q = single_q.filter_by(created_by=created_by)
+        batch_q  = batch_q.filter_by(created_by=created_by)
+    single_preds = single_q.all()
+    batch_preds  = batch_q.all()
     history      = []
     for r in single_preds:
         d = r.to_dict()
@@ -771,12 +831,16 @@ def get_patient(patient_id):
                          "prediction": d.get("final_prediction"),
                          "source": "Batch", "created_by": d.get("created_by", "system")})
 
-    ph_rows = PredictionHistory.query.filter_by(patient_id=patient_id).order_by(PredictionHistory.created_at.desc()).all()
+    ph_q = PredictionHistory.query.filter_by(patient_id=patient_id)
+    if created_by:
+        ph_q = ph_q.filter_by(created_by=created_by)
+    ph_rows = ph_q.order_by(PredictionHistory.created_at.desc()).all()
     for r in ph_rows:
         d = r.to_dict()
         history.append({"date": d.get("created_at"), "model": d.get("model_used"),
                          "risk_score": d.get("risk_score"), "prediction": d.get("prediction_result"),
-                         "source": d.get("prediction_source", "").capitalize(), "created_by": None})
+                         "source": d.get("prediction_source", "").capitalize(),
+                         "created_by": d.get("created_by", "system")})
 
     seen, unique_history = set(), []
     for h in history:

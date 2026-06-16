@@ -1,9 +1,7 @@
-// src/components/PatientModal.jsx
 import { useEffect, useState } from 'react'
 import { X, User, Activity, Clock, AlertTriangle, CheckCircle2 } from 'lucide-react'
 import Spinner from './Spinner'
-
-const API = 'http://127.0.0.1:5000/api'
+import { getPatient } from '../services/api'
 
 function InfoRow({ label, value }) {
   if (value === null || value === undefined || value === '') return null
@@ -36,8 +34,7 @@ export default function PatientModal({ patientId, onClose }) {
   useEffect(() => {
     if (!patientId) return
     setLoading(true); setError(null)
-    fetch(`${API}/patient/${encodeURIComponent(patientId)}`)
-      .then(r => r.json())
+    getPatient(patientId)
       .then(d => {
         if (d.error) throw new Error(d.error)
         setData(d)

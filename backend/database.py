@@ -23,6 +23,7 @@ class User(db.Model):
     id            = db.Column(db.Integer, primary_key=True, autoincrement=True)
     username      = db.Column(db.String(50), unique=True, nullable=False, index=True)
     password_hash = db.Column(db.String(255), nullable=False)
+    role          = db.Column(db.String(20), nullable=False, default='doctor')
     created_at    = db.Column(db.DateTime, default=datetime.utcnow)
 
     def to_dict(self):
@@ -30,6 +31,7 @@ class User(db.Model):
         return {
             'id':         self.id,
             'username':   self.username,
+            'role':       self.role,
             'created_at': to_ist(self.created_at),
         }
 
@@ -86,6 +88,7 @@ class PredictionHistory(db.Model):
     confidence_score  = db.Column(db.String(20))
     model_used        = db.Column(db.String(50), default='LightGBM')
     prediction_source = db.Column(db.String(20), default='single')
+    created_by        = db.Column(db.String(50), nullable=True)
     created_at        = db.Column(db.DateTime, default=datetime.utcnow)
 
     def to_dict(self):
@@ -97,6 +100,7 @@ class PredictionHistory(db.Model):
             'confidence_score':  self.confidence_score,
             'model_used':        self.model_used,
             'prediction_source': self.prediction_source,
+            'created_by':        self.created_by or 'system',
             'created_at':        to_ist(self.created_at),
         }
 

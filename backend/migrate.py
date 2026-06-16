@@ -33,23 +33,38 @@ if not table_exists('users'):
             created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     """)
-    print("✓ Created users table")
+    print("[OK] Created users table")
 else:
-    print("✓ users table already exists")
+    print("[OK] users table already exists")
 
 # 2. Add created_by to patient_predictions
 if not column_exists('patient_predictions', 'created_by'):
     cur.execute("ALTER TABLE patient_predictions ADD COLUMN created_by TEXT DEFAULT 'system'")
-    print("✓ Added created_by to patient_predictions")
+    print("[OK] Added created_by to patient_predictions")
 else:
-    print("✓ patient_predictions.created_by already exists")
+    print("[OK] patient_predictions.created_by already exists")
 
 # 3. Add created_by to batch_predictions
 if not column_exists('batch_predictions', 'created_by'):
     cur.execute("ALTER TABLE batch_predictions ADD COLUMN created_by TEXT DEFAULT 'system'")
-    print("✓ Added created_by to batch_predictions")
+    print("[OK] Added created_by to batch_predictions")
 else:
-    print("✓ batch_predictions.created_by already exists")
+    print("[OK] batch_predictions.created_by already exists")
+
+# 3b. Add role to users
+if table_exists('users') and not column_exists('users', 'role'):
+    cur.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'doctor'")
+    cur.execute("UPDATE users SET role = 'admin' WHERE username = 'admin'")
+    print("[OK] Added role to users (admin user set to admin)")
+elif table_exists('users'):
+    print("[OK] users.role already exists")
+
+# 3c. Add created_by to prediction_history
+if table_exists('prediction_history') and not column_exists('prediction_history', 'created_by'):
+    cur.execute("ALTER TABLE prediction_history ADD COLUMN created_by TEXT")
+    print("[OK] Added created_by to prediction_history")
+elif table_exists('prediction_history'):
+    print("[OK] prediction_history.created_by already exists")
 
 # 4. Create patients table if missing
 if not table_exists('patients'):
@@ -70,7 +85,7 @@ if not table_exists('patients'):
             created_at        DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     """)
-    print("✓ Created patients table")
+    print("[OK] Created patients table")
 
 # 5. Create prediction_history table if missing
 if not table_exists('prediction_history'):
@@ -86,8 +101,8 @@ if not table_exists('prediction_history'):
             created_at        DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     """)
-    print("✓ Created prediction_history table")
+    print("[OK] Created prediction_history table")
 
 conn.commit()
 conn.close()
-print("\n✅ Migration complete. No existing data was modified.")
+print("\nMigration complete. No existing data was modified.")
