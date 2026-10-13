@@ -1,6 +1,10 @@
 import axios from 'axios'
 
-const api = axios.create({ baseURL: '/api' })
+export const API_BASE_URL =
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.DEV ? '/api' : 'https://stroke-prediction-system-lihd.onrender.com/api')
+
+const api = axios.create({ baseURL: API_BASE_URL })
 
 // Attach JWT to every request automatically
 api.interceptors.request.use(config => {
@@ -50,7 +54,7 @@ export const downloadResults = (results) =>
   })
 
 export const downloadTemplate = () => {
-  window.location.href = '/api/sample-template'
+  window.location.href = `${API_BASE_URL}/sample-template`
 }
 
 export const savePrediction = (payload) =>

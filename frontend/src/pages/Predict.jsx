@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { predict, savePrediction } from '../services/api'
+import { predict, savePrediction, API_BASE_URL } from '../services/api'
 import PageHeader from '../components/PageHeader'
 import RiskGauge from '../components/RiskGauge'
 import Spinner from '../components/Spinner'
@@ -9,7 +9,7 @@ import {
   Brain, ShieldAlert, Save, Search, UserPlus
 } from 'lucide-react'
 
-const API = 'https://stroke-prediction-system-lihd.onrender.com/api'
+const API = API_BASE_URL
 
 const INITIAL = {
   id: '', gender: '', age: '', hypertension: '',
@@ -141,7 +141,7 @@ export default function Predict() {
         ...form, prediction: result.final_prediction,
         probability: result.probability, risk_level: result.risk_level, explanation: result.explanation
       }
-      const response = await fetch("https://stroke-prediction-system-lihd.onrender.com/api/download-stroke-pdf", {
+      const response = await fetch(`${API_BASE_URL}/download-stroke-pdf`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
       })
       if (!response.ok) { const err = await response.json(); throw new Error(err.error || "PDF failed") }

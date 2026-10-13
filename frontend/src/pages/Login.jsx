@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useAuth } from '../context/AuthContext'
+import { API_BASE_URL } from '../services/api'
 import { Activity, Eye, EyeOff } from 'lucide-react'
 import Spinner from '../components/Spinner'
 
@@ -14,7 +15,7 @@ export default function Login() {
     e.preventDefault()
     setError(null); setLoading(true)
     try {
-      const res = await fetch('https://stroke-prediction-system-lihd.onrender.com/api/login', {
+      const res = await fetch(`${API_BASE_URL}/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form),

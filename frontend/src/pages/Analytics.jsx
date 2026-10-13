@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import { getPredictions, getAnalyticsMetrics } from '../services/api'
+import { getPredictions, getAnalyticsMetrics, API_BASE_URL } from '../services/api'
 import { useAuth } from '../context/AuthContext'
 import PageHeader from '../components/PageHeader'
 import Spinner from '../components/Spinner'
@@ -78,7 +78,7 @@ export default function Analytics() {
   
 
   const downloadCSV = async () => {
-    const res  = await fetch("https://stroke-prediction-system-lihd.onrender.com/api/download-metrics")
+    const res  = await fetch(`${API_BASE_URL}/download-metrics`)
     const blob = await res.blob()
     const url  = window.URL.createObjectURL(blob)
     const a    = document.createElement("a")
@@ -87,7 +87,7 @@ export default function Analytics() {
 
   const downloadStrokePDF = async (formData) => {
     try {
-      const response = await fetch("https://stroke-prediction-system-lihd.onrender.com/api/download-stroke-pdf", {
+      const response = await fetch(`${API_BASE_URL}/download-stroke-pdf`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(formData),
       })
       if (!response.ok) { const err = await response.json(); throw new Error(err.error || "Failed to generate PDF") }

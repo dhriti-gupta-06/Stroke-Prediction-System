@@ -26,15 +26,36 @@ CORS(app, resources={r"/api/*": {"origins": "*"}},
 # ─── Config ──────────────────────────────────────────────────────────────────
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///stroke_predictions.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['JWT_SECRET_KEY'] = 'neuralstroke-jwt-secret-2026-change-in-production'
+app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'neuralstroke-jwt-secret-2026-change-in-production')
 JWT_ALGORITHM  = 'HS256'
 JWT_EXPIRY_HRS = 12
 
 from database import db, PatientPrediction, BatchPrediction, Patient, PredictionHistory, User
 db.init_app(app)
 
+def init_default_users():
+    """Ensure default demo users exist. Idempotent and safe to run on every startup."""
+    default_users = [
+        ("doctor1", os.environ.get("DEMO_DOCTOR1_PASSWORD", "pass123"), "doctor"),
+        ("doctor2", os.environ.get("DEMO_DOCTOR2_PASSWORD", "pass456"), "doctor"),
+        ("admin",   os.environ.get("DEMO_ADMIN_PASSWORD",   "admin123"), "admin"),
+    ]
+    for username, raw_password, role in default_users:
+        user = User.query.filter_by(username=username).first()
+        if not user:
+            pw_hash = bcrypt.hashpw(raw_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+            db.session.add(User(username=username, password_hash=pw_hash, role=role))
+        elif not user.role or (username == 'admin' and user.role != 'admin'):
+            user.role = role
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        app.logger.error(f"Error seeding default users: {e}")
+
 with app.app_context():
     db.create_all()
+    init_default_users()
 
 # ─── Load Models ────────────────────────────────────────────────────────────
 MODEL_DIR = "models"
@@ -138,7 +159,13 @@ def get_risk_level(prob):
 
 
 def run_all_models(patient):
-    df = preprocess_input(patient, bmi_median, le_married, le_residence, feature_columns)
+    model_patient = dict(patient)
+    try:
+        model_patient["id"] = float(model_patient.get("id", 0) or 0)
+    except (ValueError, TypeError):
+        model_patient["id"] = 0.0
+
+    df = preprocess_input(model_patient, bmi_median, le_married, le_residence, feature_columns)
     df_scaled = scaler.transform(df)
     return {
         "Logistic Regression":   float(lr.predict_proba(df_scaled)[:, 1][0]),
@@ -275,7 +302,7 @@ def login():
 
 @app.route("/api/me", methods=["GET"])
 @jwt_required
-def me(current_username):
+def me(current_username, current_role=None):
     user = User.query.filter_by(username=current_username).first()
     if not user:
         return jsonify({"error": "User not found"}), 404
@@ -457,8 +484,10 @@ def advanced_metrics(current_username, current_role):
 @app.route("/api/predict", methods=["POST"])
 def predict():
     data = request.get_json()
+    raw_id = data.get("id")
+    p_id = int(raw_id) if str(raw_id).strip().isdigit() else (str(raw_id).strip() if raw_id else 0)
     patient = {
-        "id":                int(data["id"]) if data.get("id") else 0,
+        "id":                p_id,
         "gender":            data["gender"],
         "age":               float(data["age"]),
         "hypertension":      int(data["hypertension"]),
@@ -515,8 +544,10 @@ def batch_predict():
 
     results = []
     for _, row in df_input.iterrows():
+        raw_row_id = row.get("id")
+        b_id = int(raw_row_id) if not pd.isna(raw_row_id) and str(raw_row_id).strip().isdigit() else (str(raw_row_id).strip() if not pd.isna(raw_row_id) else 0)
         patient = {
-            "id":                int(row["id"]) if not pd.isna(row["id"]) else 0,
+            "id":                b_id,
             "gender":            str(row["gender"]),
             "age":               float(row["age"]),
             "hypertension":      int(row["hypertension"]),
