@@ -22,3 +22,4 @@ openpyxl
 reportlab
 PyJWT
 bcrypt
+gunicorn
