@@ -9,7 +9,7 @@ import {
   Brain, ShieldAlert, Save, Search, UserPlus
 } from 'lucide-react'
 
-const API = 'http://127.0.0.1:5000/api'
+const API = 'https://stroke-prediction-system-lihd.onrender.com/api'
 
 const INITIAL = {
   id: '', gender: '', age: '', hypertension: '',
@@ -19,48 +19,48 @@ const INITIAL = {
 }
 
 const SELECT_OPTS = {
-  gender:         ['Male','Female','Other'],
-  hypertension:   ['0','1'],
-  heart_disease:  ['0','1'],
-  ever_married:   ['Yes','No'],
-  work_type:      ['Private','Self-employed','Govt_job','children','Never_worked'],
-  Residence_type: ['Urban','Rural'],
-  smoking_status: ['never smoked','formerly smoked','smokes','Unknown'],
+  gender: ['Male', 'Female', 'Other'],
+  hypertension: ['0', '1'],
+  heart_disease: ['0', '1'],
+  ever_married: ['Yes', 'No'],
+  work_type: ['Private', 'Self-employed', 'Govt_job', 'children', 'Never_worked'],
+  Residence_type: ['Urban', 'Rural'],
+  smoking_status: ['never smoked', 'formerly smoked', 'smokes', 'Unknown'],
 }
 
 const FIELDS = [
   [
-    { key: 'id',                label: 'Patient ID',         type: 'number', placeholder: 'e.g. 12345' },
-    { key: 'gender',            label: 'Gender',             type: 'select' },
-    { key: 'age',               label: 'Age',                type: 'number', placeholder: 'Years' },
-    { key: 'ever_married',      label: 'Ever Married',       type: 'select' },
+    { key: 'id', label: 'Patient ID', type: 'number', placeholder: 'e.g. 12345' },
+    { key: 'gender', label: 'Gender', type: 'select' },
+    { key: 'age', label: 'Age', type: 'number', placeholder: 'Years' },
+    { key: 'ever_married', label: 'Ever Married', type: 'select' },
   ],
   [
-    { key: 'hypertension',      label: 'Hypertension',       type: 'select', hint: '0 = No, 1 = Yes' },
-    { key: 'heart_disease',     label: 'Heart Disease',      type: 'select', hint: '0 = No, 1 = Yes' },
-    { key: 'work_type',         label: 'Work Type',          type: 'select' },
-    { key: 'Residence_type',    label: 'Residence',          type: 'select' },
+    { key: 'hypertension', label: 'Hypertension', type: 'select', hint: '0 = No, 1 = Yes' },
+    { key: 'heart_disease', label: 'Heart Disease', type: 'select', hint: '0 = No, 1 = Yes' },
+    { key: 'work_type', label: 'Work Type', type: 'select' },
+    { key: 'Residence_type', label: 'Residence', type: 'select' },
   ],
   [
-    { key: 'avg_glucose_level', label: 'Avg Glucose Level',  type: 'number', placeholder: 'mg/dL, e.g. 150' },
-    { key: 'bmi',               label: 'BMI',                type: 'number', placeholder: 'e.g. 26.5' },
-    { key: 'smoking_status',    label: 'Smoking Status',     type: 'select' },
+    { key: 'avg_glucose_level', label: 'Avg Glucose Level', type: 'number', placeholder: 'mg/dL, e.g. 150' },
+    { key: 'bmi', label: 'BMI', type: 'number', placeholder: 'e.g. 26.5' },
+    { key: 'smoking_status', label: 'Smoking Status', type: 'select' },
   ]
 ]
 
 export default function Predict() {
-  const [form,    setForm]    = useState(INITIAL)
-  const [result,  setResult]  = useState(null)
+  const [form, setForm] = useState(INITIAL)
+  const [result, setResult] = useState(null)
   const [loading, setLoading] = useState(false)
-  const [error,   setError]   = useState(null)
-  const [saving,  setSaving]  = useState(false)
-  const [saved,   setSaved]   = useState(false)
+  const [error, setError] = useState(null)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
 
   // ── Patient lookup state ──────────────────────────────────────────────────
-  const [lookupId,      setLookupId]      = useState('')
-  const [lookupStatus,  setLookupStatus]  = useState(null)   // null | 'found' | 'not-found' | 'new'
+  const [lookupId, setLookupId] = useState('')
+  const [lookupStatus, setLookupStatus] = useState(null)   // null | 'found' | 'not-found' | 'new'
   const [lookupLoading, setLookupLoading] = useState(false)
-  const [generatedId,   setGeneratedId]   = useState(null)   // shown after save for new patient
+  const [generatedId, setGeneratedId] = useState(null)   // shown after save for new patient
 
   const handleChange = e => setForm(p => ({ ...p, [e.target.name]: e.target.value }))
 
@@ -70,7 +70,7 @@ export default function Predict() {
     if (!pid) return
     setLookupLoading(true); setLookupStatus(null)
     try {
-      const res  = await fetch(`${API}/check-patient`, {
+      const res = await fetch(`${API}/check-patient`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ patient_id: pid }),
       })
@@ -79,17 +79,17 @@ export default function Predict() {
         const p = data.patient
         setForm(prev => ({
           ...prev,
-          id:                p.patient_id || prev.id,
-          gender:            p.gender            || prev.gender,
-          age:               p.age               ?? prev.age,
-          hypertension:      p.hypertension      ?? prev.hypertension,
-          heart_disease:     p.heart_disease     ?? prev.heart_disease,
-          ever_married:      p.ever_married      || prev.ever_married,
-          work_type:         p.work_type         || prev.work_type,
-          Residence_type:    p.residence_type    || prev.Residence_type,
+          id: p.patient_id || prev.id,
+          gender: p.gender || prev.gender,
+          age: p.age ?? prev.age,
+          hypertension: p.hypertension ?? prev.hypertension,
+          heart_disease: p.heart_disease ?? prev.heart_disease,
+          ever_married: p.ever_married || prev.ever_married,
+          work_type: p.work_type || prev.work_type,
+          Residence_type: p.residence_type || prev.Residence_type,
           avg_glucose_level: p.avg_glucose_level ?? prev.avg_glucose_level,
-          bmi:               p.bmi               ?? prev.bmi,
-          smoking_status:    p.smoking_status    || prev.smoking_status,
+          bmi: p.bmi ?? prev.bmi,
+          smoking_status: p.smoking_status || prev.smoking_status,
         }))
         setLookupStatus('found')
       } else {
@@ -137,15 +137,17 @@ export default function Predict() {
   const downloadPDF = async () => {
     if (!result) return
     try {
-      const payload = { ...form, prediction: result.final_prediction,
-        probability: result.probability, risk_level: result.risk_level, explanation: result.explanation }
-      const response = await fetch("http://127.0.0.1:5000/api/download-stroke-pdf", {
+      const payload = {
+        ...form, prediction: result.final_prediction,
+        probability: result.probability, risk_level: result.risk_level, explanation: result.explanation
+      }
+      const response = await fetch("https://stroke-prediction-system-lihd.onrender.com/api/download-stroke-pdf", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
       })
       if (!response.ok) { const err = await response.json(); throw new Error(err.error || "PDF failed") }
       const blob = await response.blob()
-      const url  = window.URL.createObjectURL(blob)
-      const a    = document.createElement("a")
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement("a")
       a.href = url; a.download = "stroke_risk_report.pdf"; a.click()
       window.URL.revokeObjectURL(url)
     } catch (err) { alert("PDF Error: " + err.message) }
@@ -171,7 +173,7 @@ export default function Predict() {
         )}
       />
 
-      
+
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
         {/* Form */}
         <div className={`${result ? 'lg:col-span-3' : 'lg:col-span-5'} card p-6`}>
@@ -222,11 +224,10 @@ export default function Predict() {
             <button
               onClick={handleSave}
               disabled={saving || saved}
-              className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm transition-all duration-150 border ${
-                saved
+              className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm transition-all duration-150 border ${saved
                   ? 'bg-emerald-50 border-emerald-200 text-emerald-700 cursor-default'
                   : 'bg-white border-slate-200 text-slate-700 hover:border-brand-300 hover:text-brand-700'
-              }`}
+                }`}
             >
               {saving ? (
                 <><Spinner size="sm" /> Saving…</>
@@ -292,7 +293,7 @@ export default function Predict() {
               <ul className="space-y-2">
                 {result.explanation?.map((r, i) => (
                   <li key={i} className="flex items-start gap-2 text-sm text-slate-600">
-                    <span className="mt-0.5 w-5 h-5 rounded-full bg-brand-50 text-brand-600 flex items-center justify-center text-xs font-bold shrink-0">{i+1}</span>
+                    <span className="mt-0.5 w-5 h-5 rounded-full bg-brand-50 text-brand-600 flex items-center justify-center text-xs font-bold shrink-0">{i + 1}</span>
                     {r}
                   </li>
                 ))}
