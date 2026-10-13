@@ -5,19 +5,19 @@ import Spinner from '../components/Spinner'
 
 export default function Login() {
   const { login } = useAuth()
-  const [form,     setForm]     = useState({ username: '', password: '' })
-  const [loading,  setLoading]  = useState(false)
-  const [error,    setError]    = useState(null)
+  const [form, setForm] = useState({ username: '', password: '' })
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
   const [showPass, setShowPass] = useState(false)
 
   const handleSubmit = async e => {
     e.preventDefault()
     setError(null); setLoading(true)
     try {
-      const res  = await fetch('http://127.0.0.1:5000/api/login', {
-        method:  'POST',
+      const res = await fetch('http://127.0.0.1:5000/api/login', {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify(form),
+        body: JSON.stringify(form),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Login failed')
@@ -97,7 +97,15 @@ export default function Login() {
 
         <p className="text-center text-xs text-slate-400 mt-6">
           Contact your administrator to get access.
+
         </p>
+
+        <p className="text-center text-xs text-slate-500 mt-6">
+          <span className="block">Username: doctor1</span>
+          <span className="block">Password: pass123</span>
+        </p>
+
+
       </div>
     </div>
   )
